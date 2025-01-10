@@ -1,0 +1,10 @@
+{
+    "files.associations": {
+        "printk.h": "c",
+        "kernel.h": "c",
+        "errno.h": "c",
+        "module.h": "c",
+        "version.h": "c",
+        "init.h": "c"
+    }
+}
