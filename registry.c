@@ -15,16 +15,15 @@ struct registry_node {
     char *password;
 };
 
-rwlock_t registry_lock;
-struct list_head registry_head;
+static DEFINE_RWLOCK(registry_lock);
+
+static LIST_HEAD(registry_head);
 
 /**
  * registry_init initializes all necessary data structures to manage snapshots credentials
  * @return always 0
  */
 int registry_init() {
-    rwlock_init(&registry_lock);
-    INIT_LIST_HEAD(&registry_head);
     return 0;
 }
 
