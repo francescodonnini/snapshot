@@ -5,6 +5,7 @@
         "errno.h": "c",
         "module.h": "c",
         "version.h": "c",
-        "init.h": "c"
+        "init.h": "c",
+        "hash.h": "c"
     }
 }
