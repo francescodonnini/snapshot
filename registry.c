@@ -9,42 +9,40 @@
 #define BDEV_NAME_MAX_LEN 32
 #define SHA1_HASH_LEN 20
 
-struct registry_node {
-    struct list_head list;
+struct ry_node {
+    struct hlist_node list;
     char *dev_name;
     char *password;
 };
 
 static DEFINE_RWLOCK(registry_lock);
 
-static LIST_HEAD(registry_head);
+static struct hlist_head lt_head;
 
 /**
  * registry_init initializes all necessary data structures to manage snapshots credentials
  * @return always 0
  */
 int registry_init() {
+    INIT_HLIST_HEAD(&lt_head);
     return 0;
 }
 
-/**
- * registry_cleanup deallocates all memory allocated to store snapshots credentials
- */
 void registry_cleanup() {
     write_lock(&registry_lock);
-    while (!list_empty(&registry_head)) {
-        struct registry_node *node = container_of(registry_head.next, struct registry_node, list);
+    while (!hlist_empty(&lt_head)) {
+        struct ry_node *node = container_of(lt_head.first, struct ry_node, list);
         kfree(node->dev_name);
         kfree(node->password);
-        list_del_init(&registry_head);
+        hlist_del(lt_head.first);
         kfree(node);
     }
     write_unlock(&registry_lock);
 }
 
-static inline struct registry_node* lookup_node_raw(const char *dev_name) {
-    struct registry_node *node;
-    list_for_each_entry(node, &registry_head, list) {
+static inline struct ry_node* lookup_node_raw(const char *dev_name) {
+    struct ry_node *node;
+    hlist_for_each_entry(node, &lt_head, list) {
         if (!strncmp(node->dev_name, dev_name, BDEV_NAME_MAX_LEN)) {
             return node;
         }
@@ -52,17 +50,21 @@ static inline struct registry_node* lookup_node_raw(const char *dev_name) {
     return NULL;
 }
 
-static struct registry_node* lookup_node(const char *dev_name) {
-    struct registry_node *node;
+static struct ry_node* get_node(const char *dev_name) {
+    struct ry_node *node;
     read_lock(&registry_lock);
     node = lookup_node_raw(dev_name);
     read_unlock(&registry_lock);
     return node;
 }
 
-static struct registry_node *mk_node(const char *dev_name, const char *password) {
+static inline int lookup_node(const char *dev_name) {
+    return get_node(dev_name) != NULL;
+}
+
+static struct ry_node *mk_node(const char *dev_name, const char *password) {
     int err;
-    struct registry_node *node = kmalloc(sizeof(struct registry_node), GFP_KERNEL);
+    struct ry_node *node = kmalloc(sizeof(struct ry_node), GFP_KERNEL);
     if (node == NULL) {
         err = -ENOMEM;
         goto no_node;
@@ -82,9 +84,11 @@ static struct registry_node *mk_node(const char *dev_name, const char *password)
         err = -ENOMEM;
         goto no_password;
     }
+    INIT_HLIST_NODE(&(node->list));
     strncpy(node->dev_name, dev_name, BDEV_NAME_MAX_LEN);
     strcpy(node->password, pw_hash);
     return node;
+
 no_password:
     kfree(node->dev_name);
 no_hash:
@@ -105,21 +109,21 @@ no_node:
  * * 0 otherwise
  */
 int registry_insert(const char *dev_name, const char *password) {
-    if (lookup_node(dev_name) != NULL) {
+    if (lookup_node(dev_name)) {
         pr_debug("%s has been already registered", dev_name);
         return -EBDEVNAME;
     }
-    struct registry_node *node = mk_node(dev_name, password);
+    struct ry_node *node = mk_node(dev_name, password);
     if (IS_ERR(node)) {
         return PTR_ERR(node);
     }
     write_lock(&registry_lock);
-    list_add(&node->list, &registry_head);
+    hlist_add_head(&(node->list), &lt_head);
     write_unlock(&registry_lock);
     return 0;
 }
 
-static int check_password(struct registry_node *node, const char *password) {
+static int check_password(struct ry_node *node, const char *password) {
     char pw_hash[SHA1_HASH_LEN];
     if (hash("sha1", password, strlen(password), pw_hash)) {
         return 0;
@@ -134,9 +138,9 @@ static int check_password(struct registry_node *node, const char *password) {
  */
 void registry_delete(const char *dev_name, const char *password) {
     write_lock(&registry_lock);
-    struct registry_node *node = lookup_node_raw(dev_name);
+    struct ry_node *node = lookup_node_raw(dev_name);
     if (check_password(node, password)) {
-        list_del(&node->list);
+        hlist_del_init(&(node->list));
     }
     write_unlock(&registry_lock);
 }
@@ -149,5 +153,9 @@ void registry_delete(const char *dev_name, const char *password) {
  * @return 0 if the passwords does not match or a snapshot with dev_name does not exist, 1 otherwise.
  */
 int registry_check_password(const char *dev_name, const char *password) {
-    return check_password(lookup_node(dev_name), password);
+    struct ry_node *rp = get_node(dev_name);
+    if (!rp) {
+        return 0;
+    }
+    return check_password(rp, password);
 }

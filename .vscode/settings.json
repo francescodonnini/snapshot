@@ -12,7 +12,16 @@
         "spinlock.h": "c",
         "registry.h": "c",
         "errname.h": "c",
-        "stddef.h": "c"
+        "stddef.h": "c",
+        "hashtable_api.h": "c",
+        "hashtable.h": "c",
+        "fnv_hash.h": "c",
+        "list_bl.h": "c",
+        "*.tcc": "c",
+        "functional": "c",
+        "format": "c",
+        "streambuf": "c",
+        "variant": "c"
     },
     "C_Cpp.errorSquiggles": "disabled"
 }
