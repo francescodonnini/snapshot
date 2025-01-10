@@ -15,7 +15,8 @@ static int __init snapshot_init(void) {
     }
     registry_insert("sda1", "ciao");
     if (registry_check_password("sda1", "ciao")) {
-        return 2;
+        pr_debug(ss_pr_format("passwords don't match\n"));
+        return 0;
     }
     return 0;
 }
