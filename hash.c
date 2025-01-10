@@ -2,32 +2,11 @@
 #include "include/pr_format.h"
 #include <crypto/hash.h>
 #include <linux/printk.h>
-#include <linux/scatterlist.h>
 
 struct sdesc {
     struct shash_desc shash;
     char   *ctx;
 };
-
-static struct sdesc *init_sdesc(struct crypto_shash *alg) {
-    int size = sizeof(struct shash_desc) + crypto_shash_descsize(alg);
-    struct sdesc *sdesc = kmalloc(size, GFP_KERNEL);
-    if (!sdesc) {
-        return ERR_PTR(-ENOMEM);
-    }
-    sdesc->shash.tfm = alg;
-    return sdesc;
-}
-
-static int do_hash(struct crypto_shash *alg, const unsigned char *key, unsigned int len, unsigned char *digest) {
-    struct sdesc *sdesc = init_sdesc(alg);
-    if (IS_ERR(sdesc)) {
-        return PTR_ERR(sdesc);
-    }
-    int err = crypto_shash_digest(&sdesc->shash, key, len, digest);
-    kfree(sdesc);
-    return err;
-}
 
 /**
  * hash - calculates hash of key
@@ -42,7 +21,9 @@ int hash(const char *alg_name, const char *key, int len, char *hash) {
     if (IS_ERR(alg)) {
         return PTR_ERR(alg);
     }
-    int err = do_hash(alg, key, len, hash);
+    struct shash_desc shash;
+    shash.tfm = alg;
+    int err = crypto_shash_digest(&shash, key, len, hash);
     crypto_free_shash(alg);
     return err;
 }

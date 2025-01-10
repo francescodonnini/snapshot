@@ -6,6 +6,7 @@
         "module.h": "c",
         "version.h": "c",
         "init.h": "c",
-        "hash.h": "c"
+        "hash.h": "c",
+        "scatterlist.h": "c"
     }
 }
