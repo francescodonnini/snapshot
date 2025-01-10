@@ -1,5 +1,6 @@
 #include "include/hash.h"
 #include "include/pr_format.h"
+#include <linux/errname.h>
 #include <crypto/hash.h>
 #include <linux/printk.h>
 
@@ -24,6 +25,9 @@ int hash(const char *alg_name, const char *key, int len, char *hash) {
     struct shash_desc shash;
     shash.tfm = alg;
     int err = crypto_shash_digest(&shash, key, len, hash);
+    if (err < 0) {
+        pr_debug(ss_pr_format("cannot create hash digest (%d): %s\n"), err, errname(err));
+    }
     crypto_free_shash(alg);
     return err;
 }

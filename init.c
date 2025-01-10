@@ -1,5 +1,5 @@
 #include "include/pr_format.h"
-#include "include/hash.h"
+#include "include/registry.h"
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/printk.h>
@@ -10,12 +10,13 @@ MODULE_DESCRIPTION("Block-device snapshot");
 MODULE_LICENSE("GPL");
 
 static int __init snapshot_init(void) {
-    char h[21];
-    if (hash("sha1", "hello", strlen("hello"), h)) {
-        return 0;
+    if (registry_init()) {
+        return 1;
     }
-    h[20] = 0;
-    printk(ss_pr_format("%s\n"), h);
+    registry_insert("sda1", "ciao");
+    if (registry_check_password("sda1", "ciao")) {
+        return 2;
+    }
     return 0;
 }
 

@@ -7,6 +7,12 @@
         "version.h": "c",
         "init.h": "c",
         "hash.h": "c",
-        "scatterlist.h": "c"
-    }
+        "scatterlist.h": "c",
+        "api.h": "c",
+        "spinlock.h": "c",
+        "registry.h": "c",
+        "errname.h": "c",
+        "stddef.h": "c"
+    },
+    "C_Cpp.errorSquiggles": "disabled"
 }
