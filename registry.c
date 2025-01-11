@@ -17,14 +17,13 @@ struct registry_node {
 
 static DEFINE_RWLOCK(registry_lock);
 
-static struct hlist_head lt_head;
+static HLIST_HEAD(lt_head);
 
 /**
  * registry_init initializes all necessary data structures to manage snapshots credentials
  * @return always 0
  */
 int registry_init() {
-    INIT_HLIST_HEAD(&lt_head);
     return 0;
 }
 
