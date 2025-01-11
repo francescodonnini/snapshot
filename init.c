@@ -1,5 +1,4 @@
-#include "include/pr_format.h"
-#include "include/registry.h"
+#include "include/chrdev.h"
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/printk.h>
@@ -10,6 +9,7 @@ MODULE_DESCRIPTION("Block-device snapshot");
 MODULE_LICENSE("GPL");
 
 static int __init snapshot_init(void) {
+    chrdev_init();
     return 0;
 }
 
