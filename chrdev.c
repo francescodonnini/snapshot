@@ -7,13 +7,9 @@
 #define MY_CHARDEV_NAME "beautiful_device"
 #define MY_MAX_MINORS 1
 
-struct my_chrdev {
-    struct cdev cdev;
-};
-
 static dev_t my_dev;
 
-static struct my_chrdev devices[MY_MAX_MINORS];
+static struct cdev devices[MY_MAX_MINORS];
 
 static int my_open(struct inode *inode, struct file *file) {
     pr_debug(ss_pr_format("open() called\n"));
@@ -51,7 +47,7 @@ struct file_operations my_fops = {
 
 static void cleanup(int max_minors) {
     for (int i = 0; i < max_minors; ++i) {
-        cdev_del(&devices[i].cdev);
+        cdev_del(&devices[i]);
     }
     unregister_chrdev_region(my_dev, MY_MAX_MINORS);
 }
@@ -64,8 +60,8 @@ int chrdev_init(void) {
     }
     pr_debug(ss_pr_format("MAJOR NUMBER of \"%s\" is %d\n"), MY_CHARDEV_NAME, my_dev);
     for (int i = 0; i < MY_MAX_MINORS; ++i) {
-        cdev_init(&devices[i].cdev, &my_fops);
-        int err = cdev_add(&devices[i].cdev, MKDEV(my_dev, i), 1);
+        cdev_init(&devices[i], &my_fops);
+        int err = cdev_add(&devices[i], MKDEV(my_dev, i), 1);
         if (err) {
             pr_debug(ss_pr_format("cannot add device with number (%d, %d) because of error %d\n"), my_dev, i, err);
             cleanup(i);
