@@ -1,5 +1,5 @@
-#ifndef __SNAPSHOT_API_H__
-#define __SNAPSHOT_API_H__
+#ifndef AOS_SNAPSHOT_API_H
+#define AOS_SNAPSHOT_API_H
 
 int activate_snapshot(const char *dev_name, const char *password);
 
