@@ -69,7 +69,7 @@ static int my_uevent(const struct device *dev, __attribute__((unused)) struct ko
     return 0;
 }
 
-int chrdev_init(dev_t *ma) {
+int chrdev_init(void) {
     int err = alloc_chrdev_region(&device.dev, 0, 1, MY_CHRDEV_NAME);
     if (err) {
         pr_debug(ss_pr_format("cannot register char-device \"%s\" because of error %d\n"), MY_CHRDEV_NAME, err);

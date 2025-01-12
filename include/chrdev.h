@@ -2,7 +2,7 @@
 #define AOS_CHRDEV_H
 #include <linux/types.h>
 
-int chrdev_init(dev_t *ma);
+int chrdev_init(void);
 void chrdev_cleanup(void);
 
 #endif

@@ -1,4 +1,5 @@
 #include "include/hash.h"
+#include "include/pr_format.h"
 #include "include/registry.h"
 #include <linux/container_of.h>
 #include <linux/slab.h>
@@ -109,7 +110,7 @@ no_node:
  */
 int registry_insert(const char *dev_name, const char *password) {
     if (lookup_node(dev_name)) {
-        pr_debug("%s has been already registered", dev_name);
+        pr_debug(ss_pr_format("%s has been already registered"), dev_name);
         return -EBDEVNAME;
     }
     struct registry_node *node = mk_node(dev_name, password);
@@ -140,6 +141,7 @@ void registry_delete(const char *dev_name, const char *password) {
     struct registry_node *node = lookup_node_raw(dev_name);
     if (check_password(node, password)) {
         hlist_del_init(&(node->list));
+        pr_debug(ss_pr_format("(%s %s) successfully deleted\n"), dev_name, password);
     }
     write_unlock(&registry_lock);
 }

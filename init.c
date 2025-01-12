@@ -1,4 +1,5 @@
 #include "include/chrdev.h"
+#include "include/registry.h"
 #include <linux/crypto.h>
 #include <linux/init.h>
 #include <linux/module.h>
@@ -6,11 +7,9 @@
 #include <linux/printk.h>
 #include <linux/types.h>
 
-static dev_t chrdev_major_number;
-module_param(chrdev_major_number, int, 0444);
-
 static int __init snapshot_init(void) {
-    chrdev_init(&chrdev_major_number);
+    chrdev_init();
+    registry_init();
     return 0;
 }
 
