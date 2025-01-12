@@ -23,7 +23,14 @@
         "streambuf": "c",
         "variant": "c",
         "chrdev.h": "c",
-        "pr_format.h": "c"
+        "pr_format.h": "c",
+        "crypto.h": "c",
+        "parse.h": "c",
+        "string.h": "c",
+        "array": "c",
+        "string_view": "c",
+        "initializer_list": "c",
+        "span": "c"
     },
     "C_Cpp.errorSquiggles": "disabled"
 }

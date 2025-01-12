@@ -1,76 +1,138 @@
 #include "include/chrdev.h"
 #include "include/pr_format.h"
 #include <linux/cdev.h>
+#include <linux/device/class.h>
 #include <linux/init.h>
 #include <linux/fs.h>
+#include <linux/kobject.h>
+#include <linux/uaccess.h>
 
-#define MY_CHARDEV_NAME "beautiful_device"
-#define MY_MAX_MINORS 1
+#define MY_CHRDEV_NAME  "chrdev_snapshot"
+#define MY_CHRDEV_CLASS "chrdev_cls_snapshot"
+#define MY_CHRDEV_MNT   "snapshot_test"
+#define MAX_BUF_SIZE 4096
 
-static dev_t my_dev;
+struct fl_data {
+    uint8_t *data;
+    size_t  capacity;
+};
 
-static struct cdev devices[MY_MAX_MINORS];
 
-static int my_open(struct inode *inode, struct file *file) {
-    pr_debug(ss_pr_format("open() called\n"));
+struct chrdev {
+    dev_t        dev;
+    struct cdev  cdev;
+    struct class *class;
+};
+
+static struct chrdev device;
+
+static struct fl_data *mk_fl_data(size_t capacity) {
+    struct fl_data *fp = kmalloc(sizeof(struct fl_data), GFP_KERNEL);
+    if (fp == NULL) {
+        return ERR_PTR(-ENOMEM);
+    }
+    uint8_t *buffer = kmalloc(capacity, GFP_KERNEL);
+    if (buffer == NULL) {
+        kfree(fp);
+        return ERR_PTR(-ENOMEM);
+    }
+    fp->data = buffer;
+    fp->capacity = capacity;
+    return fp;
+}
+
+static int chrdev_open(struct inode *inode, struct file *file) {
+    struct fl_data *fl_data = mk_fl_data(MAX_BUF_SIZE);
+    if (IS_ERR(fl_data)) {
+        pr_debug(ss_pr_format("open() failed to allocate enough memory\n"));
+        return PTR_ERR(fl_data);
+    }
+    file->private_data = fl_data;
     return 0;
 }
 
-static ssize_t my_read(struct file *file, char __user *user_buffer, size_t size, loff_t *offset) {
-    pr_debug(ss_pr_format("read() called\n"));
-    return 0;
+static ssize_t chrdev_read(struct file *file, char __user *user_buffer, size_t size, loff_t *offset) {
+    struct fl_data *fl_data = file->private_data;
+    size_t n = strnlen(fl_data->data, fl_data->capacity);
+    int rem = copy_to_user(user_buffer, fl_data->data, n);
+    if (rem) {
+        pr_debug(ss_pr_format("read() failed: cannot copy all user content to buffer\n"));
+        return -EFAULT;
+    }
+    return n;
 }
 
-static ssize_t my_write(struct file *file, const char __user *user_buffer, size_t size, loff_t *offset) {
-    pr_debug(ss_pr_format("write() called\n"));
-    return 0;
+static ssize_t chrdev_write(struct file *file, const char __user *user_buffer, size_t size, loff_t *offset) {
+    struct fl_data *fl_data = file->private_data;
+    size = fl_data->capacity > size ? size : fl_data->capacity;
+    int rem = copy_from_user(fl_data->data, user_buffer, size);
+    if (rem) {
+        pr_debug(ss_pr_format("write() failed: cannot copy the buffer to user buffer\n"));
+        return -EFAULT;
+    }
+    fl_data->data[size] = 0;
+    return size;
 }
 
-static int my_release(struct inode *inode, struct file *file) {
-    pr_debug(ss_pr_format("close() called\n"));
-    return 0;
-}
-
-static long my_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
-    pr_debug(ss_pr_format("ioctl() called\n"));
+static int chrdev_release(struct inode *inode, struct file *file) {
+    kfree(file->private_data);
     return 0;
 }
 
 struct file_operations my_fops = {
-    .owner = THIS_MODULE,
-    .open = my_open,
-    .read = my_read,
-    .write = my_write,
-    .release = my_release,
-    .unlocked_ioctl = my_unlocked_ioctl
+    .owner   = THIS_MODULE,
+    .open    = chrdev_open,
+    .read    = chrdev_read,
+    .write   = chrdev_write,
+    .release = chrdev_release,
 };
 
-static void cleanup(int max_minors) {
-    for (int i = 0; i < max_minors; ++i) {
-        cdev_del(&devices[i]);
-    }
-    unregister_chrdev_region(my_dev, MY_MAX_MINORS);
-}
-
-int chrdev_init(void) {
-    int err = alloc_chrdev_region(&my_dev, 0, MY_MAX_MINORS, MY_CHARDEV_NAME);
-    if (err) {
-        pr_debug(ss_pr_format("cannot register char-device \"%s\" because of error %d\n"), MY_CHARDEV_NAME, err);
-        return err;
-    }
-    pr_debug(ss_pr_format("MAJOR NUMBER of \"%s\" is %d\n"), MY_CHARDEV_NAME, my_dev);
-    for (int i = 0; i < MY_MAX_MINORS; ++i) {
-        cdev_init(&devices[i], &my_fops);
-        int err = cdev_add(&devices[i], MKDEV(my_dev, i), 1);
-        if (err) {
-            pr_debug(ss_pr_format("cannot add device with number (%d, %d) because of error %d\n"), my_dev, i, err);
-            cleanup(i);
-            return err;
-        }
-    }
+static int my_uevent(const struct device *dev, __attribute__((unused)) struct kobj_uevent_env *env) {
+    add_uevent_var(env, "DEVMODE=%#o", 0440);
     return 0;
 }
 
+int chrdev_init(dev_t *ma) {
+    int err = alloc_chrdev_region(&device.dev, 0, 1, MY_CHRDEV_NAME);
+    if (err) {
+        pr_debug(ss_pr_format("cannot register char-device \"%s\" because of error %d\n"), MY_CHRDEV_NAME, err);
+        return err;
+    }
+    
+    cdev_init(&device.cdev, &my_fops);
+    err = cdev_add(&device.cdev, device.dev, 1);
+    if (err) {
+        pr_debug(ss_pr_format("cannot add device with number (%d, %d) because of error %d\n"), MAJOR(device.dev), MINOR(device.dev), err);
+        goto no_cdev_add;
+    }
+
+    device.class = class_create(MY_CHRDEV_CLASS);
+    if (IS_ERR(device.class)) {
+        err = PTR_ERR(device.class);
+        pr_debug(ss_pr_format("cannot create class \"%s\" because of error %d\n"), MY_CHRDEV_CLASS, err);
+        goto no_cdev_class;
+    }
+    device.class->dev_uevent = my_uevent;
+    struct device *d = device_create(device.class, NULL, device.dev, NULL, MY_CHRDEV_MNT);
+    if (IS_ERR(d)) {
+        err = PTR_ERR(d);
+        pr_debug(ss_pr_format("cannot create device /dev/%s because of error %d\n"), MY_CHRDEV_MNT, err);
+        goto no_device;
+    }
+    return 0;
+
+no_device:
+    class_destroy(device.class);
+no_cdev_class:
+    cdev_del(&device.cdev);
+no_cdev_add:
+    unregister_chrdev_region(device.dev, 1);
+    return err;
+}
+
 void chrdev_cleanup(void) {
-    cleanup(MY_MAX_MINORS);
+    device_destroy(device.class, device.dev);
+    class_destroy(device.class);
+    cdev_del(&device.cdev);
+    unregister_chrdev_region(device.dev, 1);
 }
