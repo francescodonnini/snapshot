@@ -1,3 +1,4 @@
+#include "include/chrdev_ioctl.h"
 #include "include/chrdev.h"
 #include "include/pr_format.h"
 #include <linux/cdev.h>
@@ -10,7 +11,7 @@
 #define MY_CHRDEV_NAME  "chrdev_snapshot"
 #define MY_CHRDEV_CLASS "chrdev_cls_snapshot"
 #define MY_CHRDEV_MNT   "snapshot_test"
-#define MAX_BUF_SIZE 4096
+#define MAX_BUF_SIZE    4096
 
 struct fl_data {
     uint8_t *data;
@@ -51,29 +52,6 @@ static int chrdev_open(struct inode *inode, struct file *file) {
     return 0;
 }
 
-static ssize_t chrdev_read(struct file *file, char __user *user_buffer, size_t size, loff_t *offset) {
-    struct fl_data *fl_data = file->private_data;
-    size_t n = strnlen(fl_data->data, fl_data->capacity);
-    int rem = copy_to_user(user_buffer, fl_data->data, n);
-    if (rem) {
-        pr_debug(ss_pr_format("read() failed: cannot copy all user content to buffer\n"));
-        return -EFAULT;
-    }
-    return n;
-}
-
-static ssize_t chrdev_write(struct file *file, const char __user *user_buffer, size_t size, loff_t *offset) {
-    struct fl_data *fl_data = file->private_data;
-    size = fl_data->capacity > size ? size : fl_data->capacity;
-    int rem = copy_from_user(fl_data->data, user_buffer, size);
-    if (rem) {
-        pr_debug(ss_pr_format("write() failed: cannot copy the buffer to user buffer\n"));
-        return -EFAULT;
-    }
-    fl_data->data[size] = 0;
-    return size;
-}
-
 static int chrdev_release(struct inode *inode, struct file *file) {
     kfree(file->private_data);
     return 0;
@@ -82,9 +60,8 @@ static int chrdev_release(struct inode *inode, struct file *file) {
 struct file_operations my_fops = {
     .owner   = THIS_MODULE,
     .open    = chrdev_open,
-    .read    = chrdev_read,
-    .write   = chrdev_write,
     .release = chrdev_release,
+    .unlocked_ioctl = chrdev_ioctl
 };
 
 static int my_uevent(const struct device *dev, __attribute__((unused)) struct kobj_uevent_env *env) {

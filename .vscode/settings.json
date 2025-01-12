@@ -30,7 +30,17 @@
         "array": "c",
         "string_view": "c",
         "initializer_list": "c",
-        "span": "c"
+        "span": "c",
+        "snaphostfs.h": "c",
+        "buffer_head.h": "c",
+        "aos_ioctl.h": "c",
+        "err.h": "c",
+        "uaccess.h": "c",
+        "slab.h": "c",
+        "chrdev_ioctl.h": "c",
+        "types.h": "c",
+        "fcntl.h": "c",
+        "fs.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled"
 }
