@@ -66,29 +66,30 @@ static struct registry_node *mk_node(const char *dev_name, const char *password)
         err = -ENOMEM;
         goto no_dev_name;
     }
-    char pw_hash[SHA1_HASH_LEN];
-    err = hash("sha1", password, strlen(password), pw_hash);
-    if (err) {
-        goto no_hash;
-    }
     node->password = kmalloc(SHA1_HASH_LEN, GFP_KERNEL);
     if (node->password == NULL) {
         err = -ENOMEM;
         goto no_password;
     }
+    err = hash("sha1", password, strlen(password), node->password);
+    if (err) {
+        goto no_hash;
+    }
     node->list.next = NULL;
     node->list.prev = NULL;
-    strncpy(node->dev_name, dev_name, BDEV_NAME_MAX_LEN);
-    strcpy(node->password, pw_hash);
+    size_t n = strnlen(dev_name, BDEV_NAME_MAX_LEN);
+    memcpy(node->dev_name, dev_name, n);
     return node;
 
+no_hash:
+    kfree(node->password);
 no_password:
     kfree(node->dev_name);
-no_hash:
+    kfree(node->dev_name);
 no_dev_name:
     kfree(node);
 no_node:
-    return ERR_PTR(-ENOMEM);
+    return ERR_PTR(err);
 }
 
 /**
@@ -107,12 +108,17 @@ int registry_insert(const char *dev_name, const char *password) {
     return 0;
 }
 
-static int check_password(struct registry_node *node, const char *password) {
-    char pw_hash[SHA1_HASH_LEN];
-    if (hash("sha1", password, strlen(password), pw_hash)) {
+static int check_password(const char *pw_hash, const char *password) {
+    char pw_hash2[SHA1_HASH_LEN];
+    if (hash("sha1", password, strlen(password), pw_hash2)) {
         return 0;
     }
-    return strcmp(node->password, pw_hash) == 0;
+    for (size_t i = 0; i < SHA1_HASH_LEN; ++i) {
+        if (pw_hash[i] != pw_hash2[i]) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 /**
@@ -122,7 +128,7 @@ static int check_password(struct registry_node *node, const char *password) {
  */
 void registry_delete(const char *dev_name, const char *password) {
     struct registry_node *node = lookup_node_raw(dev_name);
-    if (check_password(node, password)) {
+    if (node != NULL && check_password(node->password, password)) {
         list_del(&(node->list));
         pr_debug(ss_pr_format("(%s %s) successfully deleted\n"), dev_name, password);
     }
@@ -137,8 +143,5 @@ void registry_delete(const char *dev_name, const char *password) {
  */
 int registry_check_password(const char *dev_name, const char *password) {
     struct registry_node *rp = get_node(dev_name);
-    if (!rp) {
-        return 0;
-    }
-    return check_password(rp, password);
+    return rp != NULL && check_password(rp->password, password);
 }
