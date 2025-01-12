@@ -31,7 +31,8 @@ void registry_cleanup() {
         struct registry_node *node = container_of(lt_head.next, struct registry_node, list);
         kfree(node->dev_name);
         kfree(node->password);
-        list_del
+        list_del(&(node->list));
+        kfree(node);
     }
 }
 
@@ -101,6 +102,7 @@ no_node:
  * * 0 otherwise
  */
 int registry_insert(const char *dev_name, const char *password) {
+    struct registry_node *node = mk_node(dev_name, password);
     list_add(&(node->list), &lt_head);
     return 0;
 }
@@ -119,13 +121,11 @@ static int check_password(struct registry_node *node, const char *password) {
  * @param password the password protecting the snapshot
  */
 void registry_delete(const char *dev_name, const char *password) {
-    write_lock(&registry_lock);
     struct registry_node *node = lookup_node_raw(dev_name);
     if (check_password(node, password)) {
-        hlist_del_init(&(node->list));
-        pr_debug(ss_pr_format("(%s %s) successfully deleted\n"))
+        list_del(&(node->list));
+        pr_debug(ss_pr_format("(%s %s) successfully deleted\n"), dev_name, password);
     }
-    write_unlock(&registry_lock);
 }
 
 /**
