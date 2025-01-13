@@ -109,7 +109,10 @@ int registry_insert(const char *dev_name, const char *password) {
         return PTR_ERR(node);
     }
     // list_add(&(node->list), &lt_head);
-    pr_debug(pr_format("device %s successfully inserted\n"), dev_name);
+    pr_debug(pr_format("device %s successfully inserted\n"), node->dev_name);
+    kfree(node->dev_name);
+    kfree(node->password);
+    kfree(node);
     return 0;
 }
 

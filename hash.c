@@ -18,40 +18,41 @@ char *hash(const char *alg_name, const char *key, int len) {
     struct crypto_shash *alg = crypto_alloc_shash(alg_name, 0, 0);
     if (IS_ERR(alg)) {
         err = PTR_ERR(alg);
-        goto no_hash_alloc;
+        goto no_tfm_alloc;
     }
-    struct shash_desc desc = {
-        .tfm = alg
-    };
-    err = crypto_shash_init(&desc);
-    if (err < 0) {
-        goto no_hash;
+    struct shash_desc *desc;
+    size_t desc_size = crypto_shash_descsize(alg) + sizeof(*desc);
+    desc = kzalloc(desc_size, GFP_KERNEL);
+    if (desc == NULL) {
+        err = -ENOMEM;
+        goto error;
     }
-    err = crypto_shash_update(&desc, key, len);
-    if (err < 0) {
-        goto no_hash;
-    }
-    char *out = kmalloc(crypto_shash_digestsize(desc.tfm), GFP_KERNEL);
+    desc->tfm = alg;
+
+    size_t digest_size = crypto_shash_digestsize(alg);
+    char *out = kmalloc(digest_size, GFP_KERNEL);
     if (out == NULL) {
         err = -ENOMEM;
-        goto no_hash;
+        goto error;
     }
-    err = crypto_shash_final(&desc, out);
+    err = crypto_shash_digest(desc, key, len, out);
     if (err < 0) {
-        goto no_hash_final;
+        goto no_hash_digest;
     }
-    
-    pr_debug(pr_format("hash digest of size %d is:\n"), crypto_shash_digestsize(desc.tfm));
-    for (size_t i = 0; i < crypto_shash_digestsize(desc.tfm); ++i) {
+    pr_debug(pr_format("hash digest of size %ld is:\n"), digest_size);
+    for (size_t i = 0; i < digest_size; ++i) {
         printk("%02x", out[i]);
     }
-    crypto_free_shash(desc.tfm);    
+
+    crypto_free_shash(desc->tfm);
+    kfree(desc);  
     return out;
 
-no_hash_final:
+no_hash_digest:
     kfree(out);
-no_hash:
-    crypto_free_shash(desc.tfm);
-no_hash_alloc:
+error:
+    kfree(desc);
+    crypto_free_shash(desc->tfm);
+no_tfm_alloc:
     return ERR_PTR(err);
 }
