@@ -71,13 +71,8 @@ static struct registry_node *mk_node(const char *dev_name, const char *password)
         err = -ENOMEM;
         goto no_dev_name;
     }
-    node->password = kmalloc(SHA1_HASH_LEN, GFP_KERNEL);
-    if (node->password == NULL) {
-        err = -ENOMEM;
-        goto no_password;
-    }
-    err = hash("sha1", password, strlen(password), node->password);
-    if (err) {
+    node->password = hash("sha1", password, strlen(password));
+    if (IS_ERR(node->password)) {
         goto no_hash;
     }
     node->list.next = NULL;
@@ -86,8 +81,6 @@ static struct registry_node *mk_node(const char *dev_name, const char *password)
     return node;
 
 no_hash:
-    kfree(node->password);
-no_password:
     kfree(node->dev_name);
     kfree(node->dev_name);
 no_dev_name:
@@ -118,11 +111,13 @@ int registry_insert(const char *dev_name, const char *password) {
 }
 
 static int check_password(const char *pw_hash, const char *password) {
-    char pw_hash2[SHA1_HASH_LEN];
-    if (hash("sha1", password, strlen(password), pw_hash2)) {
+    char *hash2 = hash("sha1", password, strlen(password));
+    if (IS_ERR(hash2)) {
         return 0;
     }
-    return memcmp(pw_hash, pw_hash2, SHA1_HASH_LEN) == 0;
+    int ir = memcmp(pw_hash, hash2, SHA1_HASH_LEN) == 0;
+    kfree(hash2);
+    return ir;
 }
 
 /**
