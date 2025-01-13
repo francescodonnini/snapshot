@@ -1,5 +1,5 @@
 all:
-	gcc test.c -o test.o
+	gcc ioctl_test.c -o ioctl_test.o
 
 clean:
-	rm test.o
+	rm ioctl_test.o
