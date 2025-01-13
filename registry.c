@@ -39,7 +39,7 @@ void registry_cleanup() {
 static inline struct registry_node* lookup_node_raw(const char *dev_name) {
     struct registry_node *node;
     list_for_each_entry(node, &lt_head, list) {
-        if (!strncmp(node->dev_name, dev_name, BDEV_NAME_MAX_LEN)) {
+        if (!strncmp(node->dev_name, dev_name, BDEV_NAME_MAX_LEN + 1)) {
             return node;
         }
     }
@@ -77,8 +77,7 @@ static struct registry_node *mk_node(const char *dev_name, const char *password)
     }
     node->list.next = NULL;
     node->list.prev = NULL;
-    size_t n = strnlen(dev_name, BDEV_NAME_MAX_LEN);
-    memcpy(node->dev_name, dev_name, n);
+    strscpy(node->dev_name, dev_name, BDEV_NAME_MAX_LEN + 1);
     return node;
 
 no_hash:
@@ -113,12 +112,7 @@ static int check_password(const char *pw_hash, const char *password) {
     if (hash("sha1", password, strlen(password), pw_hash2)) {
         return 0;
     }
-    for (size_t i = 0; i < SHA1_HASH_LEN; ++i) {
-        if (pw_hash[i] != pw_hash2[i]) {
-            return 0;
-        }
-    }
-    return 1;
+    return memcmp(pw_hash, pw_hash2, SHA1_HASH_LEN) == 0;
 }
 
 /**
