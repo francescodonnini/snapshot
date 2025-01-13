@@ -1,7 +1,8 @@
 #ifndef AOS_SNAPSHOT_REGISTRY_H
 #define AOS_SNAPSHOT_REGISTRY_H
 
-#define EBDEVNAME 5000
+#define EDUPNAME 5000
+#define ETOOBIG  5001
 
 int registry_init(void);
 

@@ -7,8 +7,8 @@
 #include <linux/spinlock.h>
 #include <linux/string.h>
 
-#define BDEV_NAME_MAX_LEN 32
-#define SHA1_HASH_LEN 20
+#define BDEV_NAME_MAX_CAP 4096
+#define SHA1_HASH_LEN     20
 
 struct registry_node {
     struct list_head list;
@@ -39,7 +39,7 @@ void registry_cleanup() {
 static inline struct registry_node* lookup_node_raw(const char *dev_name) {
     struct registry_node *node;
     list_for_each_entry(node, &lt_head, list) {
-        if (!strncmp(node->dev_name, dev_name, BDEV_NAME_MAX_LEN + 1)) {
+        if (!strncmp(node->dev_name, dev_name, BDEV_NAME_MAX_CAP + 1)) {
             return node;
         }
     }
@@ -56,12 +56,17 @@ static inline int lookup_node(const char *dev_name) {
 
 static struct registry_node *mk_node(const char *dev_name, const char *password) {
     int err;
+    size_t n = strnlen(dev_name, BDEV_NAME_MAX_CAP);
+    if (n == BDEV_NAME_MAX_CAP) {
+        err = -ETOOBIG;
+        goto no_node;
+    }
     struct registry_node *node = kmalloc(sizeof(struct registry_node), GFP_KERNEL);
     if (node == NULL) {
         err = -ENOMEM;
         goto no_node;
     }
-    node->dev_name = kmalloc(BDEV_NAME_MAX_LEN + 1, GFP_KERNEL);
+    node->dev_name = kmalloc(n + 1, GFP_KERNEL);
     if (node->dev_name == NULL) {
         err = -ENOMEM;
         goto no_dev_name;
@@ -77,7 +82,7 @@ static struct registry_node *mk_node(const char *dev_name, const char *password)
     }
     node->list.next = NULL;
     node->list.prev = NULL;
-    strscpy(node->dev_name, dev_name, BDEV_NAME_MAX_LEN + 1);
+    strscpy(node->dev_name, dev_name, n + 1);
     return node;
 
 no_hash:
@@ -97,13 +102,18 @@ no_node:
  * @param dev_name the name of the block device
  * @param password the password protecting the snapshot
  * @return
- * * -EBDEVNAME if dev_name has been already used to register a block-device
- * * -ENOMEM if there isn't enough space to allocate the credentials of a new block-device
+ * * -EDUPNAME if dev_name has been already used to register a block-
+ * * -ETOOBIG  if dev_name length exceeded 4096 B
+ * * -ENOMEM   if there isn't enough space to allocate the credentials of a new block-device
  * * 0 otherwise
  */
 int registry_insert(const char *dev_name, const char *password) {
     struct registry_node *node = mk_node(dev_name, password);
+    if (IS_ERR(node)) {
+        return PTR_ERR(node);
+    }
     list_add(&(node->list), &lt_head);
+    pr_debug(pr_format("device %s successfully inserted\n"), dev_name);
     return 0;
 }
 
@@ -124,7 +134,7 @@ void registry_delete(const char *dev_name, const char *password) {
     struct registry_node *node = lookup_node_raw(dev_name);
     if (node != NULL && check_password(node->password, password)) {
         list_del(&(node->list));
-        pr_debug(pr_format("(%s %s) successfully deleted\n"), dev_name, password);
+        pr_debug(pr_format("device %s successfully deleted\n"), dev_name);
     }
 }
 
