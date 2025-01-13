@@ -45,7 +45,7 @@ static struct fl_data *mk_fl_data(size_t capacity) {
 static int chrdev_open(struct inode *inode, struct file *file) {
     struct fl_data *fl_data = mk_fl_data(MAX_BUF_SIZE);
     if (IS_ERR(fl_data)) {
-        pr_debug(ss_pr_format("open() failed to allocate enough memory\n"));
+        pr_debug(pr_format("open() failed to allocate enough memory\n"));
         return PTR_ERR(fl_data);
     }
     file->private_data = fl_data;
@@ -72,28 +72,28 @@ static int my_uevent(const struct device *dev, __attribute__((unused)) struct ko
 int chrdev_init(void) {
     int err = alloc_chrdev_region(&device.dev, 0, 1, MY_CHRDEV_NAME);
     if (err) {
-        pr_debug(ss_pr_format("cannot register char-device \"%s\" because of error %d\n"), MY_CHRDEV_NAME, err);
+        pr_debug(pr_format("cannot register char-device \"%s\" because of error %d\n"), MY_CHRDEV_NAME, err);
         return err;
     }
     
     cdev_init(&device.cdev, &my_fops);
     err = cdev_add(&device.cdev, device.dev, 1);
     if (err) {
-        pr_debug(ss_pr_format("cannot add device with number (%d, %d) because of error %d\n"), MAJOR(device.dev), MINOR(device.dev), err);
+        pr_debug(pr_format("cannot add device with number (%d, %d) because of error %d\n"), MAJOR(device.dev), MINOR(device.dev), err);
         goto no_cdev_add;
     }
 
     device.class = class_create(MY_CHRDEV_CLASS);
     if (IS_ERR(device.class)) {
         err = PTR_ERR(device.class);
-        pr_debug(ss_pr_format("cannot create class \"%s\" because of error %d\n"), MY_CHRDEV_CLASS, err);
+        pr_debug(pr_format("cannot create class \"%s\" because of error %d\n"), MY_CHRDEV_CLASS, err);
         goto no_cdev_class;
     }
     device.class->dev_uevent = my_uevent;
     struct device *d = device_create(device.class, NULL, device.dev, NULL, MY_CHRDEV_MNT);
     if (IS_ERR(d)) {
         err = PTR_ERR(d);
-        pr_debug(ss_pr_format("cannot create device /dev/%s because of error %d\n"), MY_CHRDEV_MNT, err);
+        pr_debug(pr_format("cannot create device /dev/%s because of error %d\n"), MY_CHRDEV_MNT, err);
         goto no_device;
     }
     return 0;

@@ -26,7 +26,7 @@ int hash(const char *alg_name, const char *key, int len, char *hash) {
     shash.tfm = alg;
     int err = crypto_shash_digest(&shash, key, len, hash);
     if (err < 0) {
-        pr_debug(ss_pr_format("cannot create hash digest (%d): %s\n"), err, errname(err));
+        pr_debug(pr_format("cannot create hash digest (%d): %s\n"), err, errname(err));
     }
     crypto_free_shash(alg);
     return err;

@@ -130,7 +130,7 @@ void registry_delete(const char *dev_name, const char *password) {
     struct registry_node *node = lookup_node_raw(dev_name);
     if (node != NULL && check_password(node->password, password)) {
         list_del(&(node->list));
-        pr_debug(ss_pr_format("(%s %s) successfully deleted\n"), dev_name, password);
+        pr_debug(pr_format("(%s %s) successfully deleted\n"), dev_name, password);
     }
 }
 

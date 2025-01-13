@@ -101,11 +101,11 @@ static long do_deactivate(struct ioctl_params *params) {
 
 static long check_ioctl_cmd(unsigned int cmd) {
     if (_IOC_TYPE(cmd) != CHRDEV_IOCTL_MAGIC) {
-        pr_debug(ss_pr_format("wrong magic number, expected %d but got %d\n"), CHRDEV_IOCTL_MAGIC, _IOC_TYPE(cmd));
+        pr_debug(pr_format("wrong magic number, expected %d but got %d\n"), CHRDEV_IOCTL_MAGIC, _IOC_TYPE(cmd));
         return -EINVAL;
     }
     if (_IOC_NR(cmd) > CHRDEV_IOCTL_ACTIVATE_MAX_NR) {
-        pr_debug(ss_pr_format("number too high\n"));
+        pr_debug(pr_format("number too high\n"));
         return -EINVAL;
     }
     return 0;
