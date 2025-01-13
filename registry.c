@@ -55,6 +55,7 @@ static inline int lookup_node(const char *dev_name) {
 }
 
 static struct registry_node *mk_node(const char *dev_name, const char *password) {
+    pr_debug(pr_format("mk_node started\n"));
     int err;
     size_t n = strnlen(dev_name, BDEV_NAME_MAX_CAP);
     if (n == BDEV_NAME_MAX_CAP) {
@@ -71,17 +72,19 @@ static struct registry_node *mk_node(const char *dev_name, const char *password)
         err = -ENOMEM;
         goto no_dev_name;
     }
+    pr_debug(pr_format("starting to hash password\n"));
     node->password = hash("sha1", password, strlen(password));
     if (IS_ERR(node->password)) {
+        pr_debug(pr_format("hash failed\n"));
         goto no_hash;
     }
+    pr_debug(pr_format("hash completed successfully\n"));
     node->list.next = NULL;
     node->list.prev = NULL;
     strscpy(node->dev_name, dev_name, n + 1);
     return node;
 
 no_hash:
-    kfree(node->dev_name);
     kfree(node->dev_name);
 no_dev_name:
     kfree(node);
@@ -105,7 +108,7 @@ int registry_insert(const char *dev_name, const char *password) {
     if (IS_ERR(node)) {
         return PTR_ERR(node);
     }
-    list_add(&(node->list), &lt_head);
+    // list_add(&(node->list), &lt_head);
     pr_debug(pr_format("device %s successfully inserted\n"), dev_name);
     return 0;
 }
