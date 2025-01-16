@@ -68,7 +68,7 @@ int main(int argc, const char *argv[]) {
                 cmd = CHRDEV_IOCTL_DEACTIVATE;
             }
         }
-        if (cmd != -1) {
+        if (cmd != CHRDEV_IOCTL_ACTIVATE) {
             struct ioctl_params params = {
                 .path = splits[1],
                 .path_len = strlen(splits[1]),
