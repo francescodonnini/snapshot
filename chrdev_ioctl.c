@@ -91,7 +91,7 @@ static long do_deactivate(struct ioctl_params *params) {
     }
     long err = 0;
     int irval = deactivate_snapshot(p->path, p->password);
-    long rem = copy_to_user(&(p->error), &irval, sizeof(irval));
+    long rem = copy_to_user(&(params->error), &irval, sizeof(irval));
     if (rem < 0) {
         err = -EINVAL;
     }

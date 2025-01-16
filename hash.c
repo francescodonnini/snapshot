@@ -39,10 +39,6 @@ char *hash(const char *alg_name, const char *key, int len) {
     if (err < 0) {
         goto no_hash_digest;
     }
-    pr_debug(pr_format("hash digest of size %ld is:\n"), digest_size);
-    for (size_t i = 0; i < digest_size; ++i) {
-        printk("%02x", out[i]);
-    }
 
     crypto_free_shash(desc->tfm);
     kfree(desc);  

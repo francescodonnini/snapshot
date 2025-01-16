@@ -55,7 +55,6 @@ static inline int lookup_node(const char *dev_name) {
 }
 
 static struct registry_node *mk_node(const char *dev_name, const char *password) {
-    pr_debug(pr_format("mk_node started\n"));
     int err;
     size_t n = strnlen(dev_name, BDEV_NAME_MAX_CAP);
     if (n == BDEV_NAME_MAX_CAP) {
@@ -72,13 +71,10 @@ static struct registry_node *mk_node(const char *dev_name, const char *password)
         err = -ENOMEM;
         goto no_dev_name;
     }
-    pr_debug(pr_format("starting to hash password\n"));
     node->password = hash("sha1", password, strlen(password));
     if (IS_ERR(node->password)) {
-        pr_debug(pr_format("hash failed\n"));
         goto no_hash;
     }
-    pr_debug(pr_format("hash completed successfully\n"));
     node->list.next = NULL;
     node->list.prev = NULL;
     strscpy(node->dev_name, dev_name, n + 1);
@@ -104,15 +100,14 @@ no_node:
  * * 0 otherwise
  */
 int registry_insert(const char *dev_name, const char *password) {
+    if (lookup_node(dev_name)) {
+        return -EDUPNAME;
+    }
     struct registry_node *node = mk_node(dev_name, password);
     if (IS_ERR(node)) {
         return PTR_ERR(node);
     }
-    // list_add(&(node->list), &lt_head);
-    pr_debug(pr_format("device %s successfully inserted\n"), node->dev_name);
-    kfree(node->dev_name);
-    kfree(node->password);
-    kfree(node);
+    list_add(&(node->list), &lt_head);
     return 0;
 }
 
@@ -130,13 +125,16 @@ static int check_password(const char *pw_hash, const char *password) {
  * registry_delete deletes the credentials associated with the block-device dev_name
  * @param dev_name the name of the block-device
  * @param password the password protecting the snapshot
+ * @return -EWRONGCRED if the password or the device name are wrong, 0 otherwise 
  */
-void registry_delete(const char *dev_name, const char *password) {
+int registry_delete(const char *dev_name, const char *password) {
     struct registry_node *node = lookup_node_raw(dev_name);
-    if (node != NULL && check_password(node->password, password)) {
-        list_del(&(node->list));
-        pr_debug(pr_format("device %s successfully deleted\n"), dev_name);
+    if (node == NULL || !check_password(node->password, password)) {
+        return -EWRONGCRED;
     }
+    list_del(&(node->list));
+    pr_debug(pr_format("device %s deleted successfully\n"), dev_name);
+    return 0;
 }
 
 /**

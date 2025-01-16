@@ -40,7 +40,8 @@
         "chrdev_ioctl.h": "c",
         "types.h": "c",
         "fcntl.h": "c",
-        "fs.h": "c"
+        "fs.h": "c",
+        "class.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled"
 }

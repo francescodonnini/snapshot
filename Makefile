@@ -7,6 +7,7 @@ CFLAGS_chrdev_ioctl.o += -DDEBUG
 CFLAGS_activate_snapshot.o += -DDEBUG
 CFLAGS_deactivate_snapshot.o += -DDEBUG
 CFLAGS_hash.o += -DDEBUG
+CFLAGS_registry.o += -DDEBUG
 
 all: 
 		make -C /lib/modules/$(shell uname -r)/build M=$(PWD)  modules 

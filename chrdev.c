@@ -11,13 +11,6 @@
 #define MY_CHRDEV_NAME  "chrdev_snapshot"
 #define MY_CHRDEV_CLASS "chrdev_cls_snapshot"
 #define MY_CHRDEV_MNT   "snapshot_test"
-#define MAX_BUF_SIZE    4096
-
-struct fl_data {
-    uint8_t *data;
-    size_t  capacity;
-};
-
 
 struct chrdev {
     dev_t        dev;
@@ -27,40 +20,8 @@ struct chrdev {
 
 static struct chrdev device;
 
-static struct fl_data *mk_fl_data(size_t capacity) {
-    struct fl_data *fp = kmalloc(sizeof(struct fl_data), GFP_KERNEL);
-    if (fp == NULL) {
-        return ERR_PTR(-ENOMEM);
-    }
-    uint8_t *buffer = kmalloc(capacity, GFP_KERNEL);
-    if (buffer == NULL) {
-        kfree(fp);
-        return ERR_PTR(-ENOMEM);
-    }
-    fp->data = buffer;
-    fp->capacity = capacity;
-    return fp;
-}
-
-static int chrdev_open(struct inode *inode, struct file *file) {
-    struct fl_data *fl_data = mk_fl_data(MAX_BUF_SIZE);
-    if (IS_ERR(fl_data)) {
-        pr_debug(pr_format("open() failed to allocate enough memory\n"));
-        return PTR_ERR(fl_data);
-    }
-    file->private_data = fl_data;
-    return 0;
-}
-
-static int chrdev_release(struct inode *inode, struct file *file) {
-    kfree(file->private_data);
-    return 0;
-}
-
-struct file_operations my_fops = {
+struct file_operations chrdev_fops = {
     .owner   = THIS_MODULE,
-    .open    = chrdev_open,
-    .release = chrdev_release,
     .unlocked_ioctl = chrdev_ioctl
 };
 
@@ -76,7 +37,7 @@ int chrdev_init(void) {
         return err;
     }
     
-    cdev_init(&device.cdev, &my_fops);
+    cdev_init(&device.cdev, &chrdev_fops);
     err = cdev_add(&device.cdev, device.dev, 1);
     if (err) {
         pr_debug(pr_format("cannot add device with number (%d, %d) because of error %d\n"), MAJOR(device.dev), MINOR(device.dev), err);

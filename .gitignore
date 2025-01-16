@@ -10,3 +10,4 @@
 **/*.order.cmd
 **/*.symvers
 **/*.symvers.cmd
+/docs/*
