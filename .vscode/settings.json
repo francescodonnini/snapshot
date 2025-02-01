@@ -44,5 +44,15 @@
         "class.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
-    "makefile.configureOnOpen": true
+    "makefile.configureOnOpen": true,
+    "files.exclude": {
+        "**/*.o": true,
+        "**/*.o.*": true,
+        "**/*.cmd": true,
+        "**/*.symvers": true,
+        "**/*.order": true,
+        "**/*.ko": true,
+        "**/*.mod": true,
+        "**/*.mod.*": true
+    }
 }
