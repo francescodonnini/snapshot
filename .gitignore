@@ -11,3 +11,4 @@
 **/*.symvers
 **/*.symvers.cmd
 /docs/*
+.vscode/c_cpp_properties.json

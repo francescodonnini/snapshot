@@ -11,10 +11,10 @@
                 "${workspaceFolder}/",
                 "/usr/include",
                 "/usr/local/include",
-                "/usr/lib/gcc/x86_64-redhat-linux/14/include/",
-                "/usr/src/kernels/6.12.8-200.fc41.x86_64/include/",
-                "/usr/src/kernels/6.12.8-200.fc41.x86_64/arch/x86/include/",
-                "/usr/src/kernels/6.12.8-200.fc41.x86_64/arch/x86/include/generated"
+                "/usr/lib/gcc/x86_64-linux-gnu/14/include/",
+                "/usr/src/linux-headers-6.11.0-14-generic/include/",
+                "/usr/src/linux-headers-6.11.0-14-generic/arch/x86/include/",
+                "/usr/src/linux-headers-6.11.0-14-generic/arch/x86/include/generated"
             ],
             "compilerPath": "/usr/bin/gcc",
             "intelliSenseMode": "clang-x64"
