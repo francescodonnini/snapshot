@@ -3,6 +3,7 @@
 #include <linux/errname.h>
 #include <crypto/hash.h>
 #include <linux/printk.h>
+#include <linux/string.h>
 #include <linux/types.h>
 
 /**
@@ -39,9 +40,8 @@ char *hash(const char *alg_name, const char *key, int len) {
     if (err < 0) {
         goto no_hash_digest;
     }
-
     crypto_free_shash(desc->tfm);
-    kfree(desc);  
+    kfree(desc);
     return out;
 
 no_hash_digest:

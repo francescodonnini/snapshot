@@ -27,6 +27,9 @@ int registry_init() {
     return 0;
 }
 
+/**
+ * registry_cleanup deallocates all the heap-allocated data structures used by this subsystem
+ */
 void registry_cleanup() {
     unsigned long flags;
     write_lock_irqsave(&lock, flags);
@@ -40,9 +43,12 @@ void registry_cleanup() {
     write_unlock_irqrestore(&lock, flags);
 }
 
+// get_node_raw does a linear search of the list of registered devices, it must
+// be used only when the lock has been acquired
 static inline struct registry_node* get_node_raw(const char *dev_name) {
     struct registry_node *node;
     list_for_each_entry(node, &lt_head, list) {
+        pr_debug(pr_format("(iterator) %s\n"), node->dev_name);
         if (!strncmp(node->dev_name, dev_name, PATH_MAX)) {
             return node;
         }
@@ -55,6 +61,10 @@ static struct registry_node* get_node(const char *dev_name) {
     read_lock_irqsave(&lock, flags);
     struct registry_node *n = get_node_raw(dev_name);
     read_unlock_irqrestore(&lock, flags);
+    if (n)
+        pr_debug(pr_format("found node: %s\n"), dev_name);
+    else
+        pr_debug(pr_format("no node found\n"));
     return n;
 }
 
@@ -85,7 +95,7 @@ static struct registry_node *mk_node(const char *dev_name, const char *password)
     }
     node->list.next = NULL;
     node->list.prev = NULL;
-    strscpy(node->dev_name, dev_name, n);
+    strscpy(node->dev_name, dev_name, n + 1);
     return node;
 
 no_hash:
@@ -133,6 +143,12 @@ static int check_password(const char *pw_hash, const char *password) {
     return ir;
 }
 
+static inline void node_cleanup(struct registry_node *n) {
+    kfree(n->dev_name);
+    kfree(n->password);
+    kfree(n);
+}
+
 /**
  * registry_delete deletes the credentials associated with the block-device dev_name
  * @param dev_name the name of the block-device
@@ -148,6 +164,7 @@ int registry_delete(const char *dev_name, const char *password) {
     write_lock_irqsave(&lock, flags);
     list_del(&(node->list));
     write_unlock_irqrestore(&lock, flags);
+    node_cleanup(node);
     pr_debug(pr_format("device %s deleted successfully\n"), dev_name);
     return 0;
 }

@@ -1,10 +1,11 @@
 #ifndef AOS_SNAPSHOT_REGISTRY_H
 #define AOS_SNAPSHOT_REGISTRY_H
 
-/**
- * EDUPNAME    indicates that someone has tried to register a device already registered
- * EWRONGCRED  indicates that a device with the specified name or password does not exist
- */
+// EDUPNAME    indicates that someone has tried to register a device already registered
+// ETOOBIG     indicates that the device name given to registry_insert exceeds the maximum number
+//             of bytes allowed (4096 B)
+// EWRONGCRED  indicates that a device with the specified name or password does not exist
+//
 #define EDUPNAME   5000
 #define ETOOBIG    5001
 #define EWRONGCRED 5002
