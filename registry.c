@@ -48,7 +48,6 @@ void registry_cleanup() {
 static inline struct registry_node* get_node_raw(const char *dev_name) {
     struct registry_node *node;
     list_for_each_entry(node, &lt_head, list) {
-        pr_debug(pr_format("(iterator) %s\n"), node->dev_name);
         if (!strncmp(node->dev_name, dev_name, PATH_MAX)) {
             return node;
         }
@@ -61,10 +60,6 @@ static struct registry_node* get_node(const char *dev_name) {
     read_lock_irqsave(&lock, flags);
     struct registry_node *n = get_node_raw(dev_name);
     read_unlock_irqrestore(&lock, flags);
-    if (n)
-        pr_debug(pr_format("found node: %s\n"), dev_name);
-    else
-        pr_debug(pr_format("no node found\n"));
     return n;
 }
 
@@ -129,7 +124,6 @@ int registry_insert(const char *dev_name, const char *password) {
     write_lock_irqsave(&lock, flags);
     list_add(&node->list, &lt_head);
     write_unlock_irqrestore(&lock, flags);
-    pr_debug("node %s inserted successfully\n", dev_name);
     return 0;
 }
 
@@ -165,7 +159,6 @@ int registry_delete(const char *dev_name, const char *password) {
     list_del(&(node->list));
     write_unlock_irqrestore(&lock, flags);
     node_cleanup(node);
-    pr_debug(pr_format("device %s deleted successfully\n"), dev_name);
     return 0;
 }
 

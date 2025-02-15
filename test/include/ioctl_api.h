@@ -1,23 +1,21 @@
-#include <asm-generic/ioctl.h>
-#include <stddef.h>
-
 #ifndef IOCTL_API_H
 #define IOCTL_API_H
-#define CHRDEV_IOCTL_MAGIC         0xca
-#define CHRDEV_IOCTL_ACTIVATE      _IOWR(CHRDEV_IOCTL_MAGIC, CHRDEV_IOCTL_ACTIVATE_NO, struct ioctl_params)
-#define CHRDEV_IOCTL_DEACTIVATE    _IOWR(CHRDEV_IOCTL_MAGIC, CHRDEV_IOCTL_DEACTIVATE_NO, struct ioctl_params)
 
-enum {
-    CHRDEV_IOCTL_ACTIVATE_NO = 0x70,
-    CHRDEV_IOCTL_DEACTIVATE_NO,
-    CHRDEV_IOCTL_ACTIVATE_MAX_NR
-};
+static const char *snapshot_strerror(int err) {
+    switch (err)
+    {
+    case -5000:
+        return "a device registered with this name already exists";
+    case -5001:
+        return "device name is too long";
+    case -5002:
+        return "device name or password are wrong";   
+    default:
+        return "unknown error";
+    }
+}
 
-struct ioctl_params {
-    char   *path;
-    size_t path_len;
-    char   *password;
-    size_t password_len;
-    int    error;
-};
+int activate(const char *device, const char *password);
+
+int deactivate(const char *device, const char *password);
 #endif
