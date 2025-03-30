@@ -13,6 +13,7 @@
                 "/usr/local/include",
                 "/usr/lib/gcc/x86_64-linux-gnu/14/include/",
                 "/usr/src/linux-headers-6.11.0-14-generic/include/",
+                "/usr/src/linux-headers-6.11.0-14-generic/fs/",
                 "/usr/src/linux-headers-6.11.0-14-generic/arch/x86/include/",
                 "/usr/src/linux-headers-6.11.0-14-generic/arch/x86/include/generated"
             ],
