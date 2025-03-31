@@ -61,6 +61,28 @@ static int parse_mnts_info(char *bufp, struct mnts_info *mi) {
     return 0;
 }
 
+static char* getline(char *bufp, ssize_t n, struct file *fp) {
+    if (n <= 0) {
+        return NULL;
+    }
+    n--;
+    ssize_t br = kernel_read(fp, bufp, 4096L, &fp->f_pos);
+    if (br > 0) {
+        char *endp = strchr(bufp, 0);
+        if (endp) {
+            *endp = 0;
+            return bufp;
+        } else {
+            bufp[br] = 0;
+        }
+        return bufp;
+    } else if (!br) {
+        return NULL;
+    } else {
+        return ERR_PTR(br);
+    }
+}
+
 int init_procfs() {
     struct file_system_type *fs_type = get_fs_type("proc");
     if (!fs_type) {
@@ -87,11 +109,13 @@ int init_procfs() {
         pr_debug(pr_format("kmalloc failed\n"));
         return -ENOMEM;
     }
-    ssize_t br = kernel_read(fp, bufp, 4096L, &fp->f_pos);
-    if (br) {
-        pr_debug(pr_format("read file %s\n"), bufp);
-    } else {
-        pr_debug(pr_format("cannot read file, got error %ld\n"), br);
+    while (getline(bufp, 4096L, fp) != NULL) {
+        struct mnts_info mi;
+        if (parse_mnts_info(bufp, &mi)) {
+            pr_debug(pr_format("cannot parse %s\n"), bufp);
+        } else {
+            pr_debug(pr_format("%s %s %s\n"), mi.mnt_dev, mi.fs_type, mi.mnt_point);
+        }
     }
     return 0;
 }
