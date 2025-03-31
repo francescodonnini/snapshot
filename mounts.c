@@ -117,8 +117,12 @@ int find_mount(const char *dev_name) {
         pr_debug(pr_format("kmalloc failed\n"));
         goto kmalloc_error;
     }
+    int escape = 0;
     char *line;
     while ((line = getline(bufp, 4096L, fp)) != NULL) {
+        if (++escape > 256) {
+            break;
+        }
         struct mnts_info mi;
         int err = parse_mnts_info(bufp, &mi);
         if (err) {
@@ -130,6 +134,7 @@ int find_mount(const char *dev_name) {
     if (IS_ERR(line)) {
         pr_debug(pr_format("cannot complete parsing because of error %ld\n"), PTR_ERR(line));
     }
+    pr_debug(pr_format("escape=%d\n"), escape);
     return 0;
 kmalloc_error:
     int err = filp_close(fp, NULL);
