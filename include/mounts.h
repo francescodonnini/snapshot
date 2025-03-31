@@ -2,6 +2,6 @@
 #define AOS_MOUNTS_H
 #define EALRDYMNTD 5003
 
-int list_mounts(void);
+int init_procfs(void);
 
 #endif

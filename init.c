@@ -9,9 +9,9 @@
 #include <linux/types.h>
 
 static int __init snapshot_init(void) {
-    chrdev_init();
-    registry_init();
-    list_mounts();
+    // chrdev_init();
+    // registry_init();
+    init_procfs();
     return 0;
 }
 
