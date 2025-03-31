@@ -32,13 +32,17 @@ static char *getline(char *bufp, ssize_t n, struct file *fp) {
             return ERR_PTR(-1);
         }
         *t = 0;
+        pr_debug(pr_format("found line: %s\n"), bufp);
         loff_t line_len = t - bufp;
+        pr_debug(pr_format("found line of length %d\n"), t - bufp);
         if (br > line_len) {
-            pr_debug(pr_format("updating file position to -%lld bytes from current position\n"), line_len - br);
+            pr_debug(pr_format("current position of file %lld\n"), fp->f_pos);
+            pr_debug(pr_format("updating file position to %lld bytes from current position\n"), line_len - br);
             int err = vfs_llseek(fp, line_len - br, SEEK_CUR);
             if (err < 0) {
                 return ERR_PTR(err);
             }
+            pr_debug(pr_format("updated position of file %lld\n"), fp->f_pos);
         }
         return bufp;
     } else if (!br) {
