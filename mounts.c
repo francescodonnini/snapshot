@@ -26,23 +26,25 @@ static char *getline(char *bufp, ssize_t n, struct file *fp) {
         return NULL;
     }
     ssize_t br = kernel_read(fp, bufp, n, &fp->f_pos);
-        if (br) {
-            char *t = strchr(bufp, '\n');
-            if (t == NULL) {
-                return ERR_PTR(-1);
-            }
-            *t = 0;
-            loff_t line_end = t - bufp;
-            int err = vfs_llseek(fp, line_end, SEEK_CUR);
+    if (br) {
+        char *t = strchr(bufp, '\n');
+        if (t == NULL) {
+            return ERR_PTR(-1);
+        }
+        *t = 0;
+        loff_t line_len = t - bufp;
+        if (br > line_len) {
+            int err = vfs_llseek(fp, line_len - br, SEEK_CUR);
             if (err < 0) {
                 return ERR_PTR(err);
             }
-            return bufp;
-        } else if (!br) {
-            return NULL;
-        } else {
-            return ERR_PTR(br);
         }
+        return bufp;
+    } else if (!br) {
+        return NULL;
+    } else {
+        return ERR_PTR(br);
+    }
 }
 
 static int parse_mnts_info(char *bufp, struct mnts_info *mi) {
