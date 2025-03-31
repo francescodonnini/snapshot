@@ -47,7 +47,15 @@
         "stdio.h": "c",
         "mount.h": "c",
         "refcount.h": "c",
-        "sched.h": "c"
+        "sched.h": "c",
+        "kern_levels.h": "c",
+        "stdarg.h": "c",
+        "mounts.h": "c",
+        "list.h": "c",
+        "fs_types.h": "c",
+        "vmlinux.h": "c",
+        "nsproxy.h": "c",
+        "container_of.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
     "makefile.configureOnOpen": true,

@@ -1,4 +1,5 @@
 #include "include/chrdev.h"
+#include "include/mounts.h"
 #include "include/registry.h"
 #include <linux/crypto.h>
 #include <linux/init.h>
@@ -10,6 +11,7 @@
 static int __init snapshot_init(void) {
     chrdev_init();
     registry_init();
+    list_mounts();
     return 0;
 }
 

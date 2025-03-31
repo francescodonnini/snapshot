@@ -1,5 +1,5 @@
-#ifndef AOS_SNAPSHOT_PR_FORMAT_H
-#define AOS_SNAPSHOT_PR_FORMAT_H
+#ifndef AOS_PR_FORMAT_H
+#define AOS_PR_FORMAT_H
 #include <linux/module.h>
 
 // adds some informations to the printk format string.

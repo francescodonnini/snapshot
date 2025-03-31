@@ -1,5 +1,5 @@
-#ifndef AOS_SNAPSHOT_REGISTRY_H
-#define AOS_SNAPSHOT_REGISTRY_H
+#ifndef AOS_REGISTRY_H
+#define AOS_REGISTRY_H
 
 // EDUPNAME    indicates that someone has tried to register a device already registered
 // ETOOBIG     indicates that the device name given to registry_insert exceeds the maximum number
