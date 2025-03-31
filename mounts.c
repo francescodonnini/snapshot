@@ -90,6 +90,8 @@ int init_procfs() {
     ssize_t br = kernel_read(fp, bufp, 4096L, &fp->f_pos);
     if (br) {
         pr_debug(pr_format("read file %s\n"), bufp);
+    } else {
+        pr_debug(pr_format("cannot read file, got error %ld\n"), br);
     }
     return 0;
 }
