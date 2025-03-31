@@ -34,7 +34,7 @@ static char *getline(char *bufp, ssize_t n, struct file *fp) {
             *t = 0;
             loff_t line_end = t - bufp;
             int err = vfs_llseek(fp, line_end, SEEK_CUR);
-            if (err) {
+            if (err < 0) {
                 return ERR_PTR(err);
             }
             return bufp;
