@@ -4,4 +4,6 @@
 
 int init_procfs(void);
 
+int find_mount(const char *dev_name);
+
 #endif

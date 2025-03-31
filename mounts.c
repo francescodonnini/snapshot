@@ -5,6 +5,7 @@
 #include <linux/printk.h>
 #include <linux/string.h>
 #include <linux/slab.h>
+#include <linux/types.h>
 
 #define BUF_SIZE 4096L
 
@@ -17,6 +18,30 @@ struct mnts_info {
     long       fsck_order;
 };
 
+struct vfsmount *mnt;
+
+static char *getline(char *bufp, ssize_t n, struct file *fp) {
+    --n;
+    if (n <= 0) {
+        return NULL;
+    }
+    ssize_t br = kernel_read(fp, bufp, n, &fp->f_pos);
+        if (br) {
+            char *t = strchr(bufp, '\n');
+            if (t == NULL) {
+                return ERR_PTR(-1);
+            }
+            int err = vfs_llseek(fp, br, SEEK_CUR);
+            if (err) {
+                return ERR_PTR(err);
+            }
+            return bufp;
+        } else if (!br) {
+            return NULL;
+        } else {
+            return ERR_PTR(br);
+        }
+}
 
 static int parse_mnts_info(char *bufp, struct mnts_info *mi) {
     bufp = strim(bufp);
@@ -63,39 +88,21 @@ static int parse_mnts_info(char *bufp, struct mnts_info *mi) {
     return 0;
 }
 
-static char* getline(char *bufp, ssize_t n, struct file *fp) {
-    if (n <= 0) {
-        return NULL;
-    }
-    n--;
-    ssize_t br = kernel_read(fp, bufp, 4096L, &fp->f_pos);
-    if (br > 0) {
-        char *endp = strchr(bufp, 0);
-        if (endp) {
-            *endp = 0;
-            return bufp;
-        } else {
-            bufp[br] = 0;
-        }
-        return bufp;
-    } else if (!br) {
-        return NULL;
-    } else {
-        return ERR_PTR(br);
-    }
-}
-
 int init_procfs() {
     struct file_system_type *fs_type = get_fs_type("proc");
     if (!fs_type) {
         pr_debug(pr_format("cannot find procfs\n"));
         return -1;
     }
-    struct vfsmount *mnt = kern_mount(fs_type);
+    mnt = kern_mount(fs_type);
     if (IS_ERR(mnt)) {
         pr_debug(pr_format("cannot mount procfs\n"));
-        return -1;
+        return PTR_ERR(mnt);
     }
+    return 0;
+}
+
+int find_mount(const char *dev_name) {
     struct file *fp = file_open_root_mnt(mnt, "mounts", O_RDONLY, 0);
     if (IS_ERR(fp)) {
         pr_debug(pr_format("cannot open /mounts\n"));
