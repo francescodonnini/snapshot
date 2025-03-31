@@ -20,39 +20,41 @@ struct mnts_info {
 
 static int parse_mnts_info(char *bufp, struct mnts_info *mi) {
     bufp = strim(bufp);
+    pr_debug(pr_format("start parsing %s\n"), bufp);
     const char *sep = " \t";
-    char *s = strsep(&bufp, sep);
-    if (!s) {
-        pr_debug(pr_format("cannot parse line %s\n"), bufp);
-        return -1;
-    }
     mi->mnt_dev = strsep(&bufp, sep);
+    pr_debug(pr_format("token=%s\n"), mi->mnt_dev);
     if (!mi->mnt_dev) {
         pr_debug(pr_format("cannot parse line %s\n"), bufp);
         return -1;
     }
     mi->mnt_point = strsep(&bufp, sep);
+    pr_debug(pr_format("token=%s\n"), mi->mnt_point);
     if (!mi->mnt_point) {
         pr_debug(pr_format("cannot parse line %s\n"), bufp);
         return -1;
     }
     mi->fs_type = strsep(&bufp, sep);
+    pr_debug(pr_format("token=%s\n"), mi->fs_type);
     if (!mi->fs_type) {
         pr_debug(pr_format("cannot parse line %s\n"), bufp);
         return -1;
     }
     mi->mnt_opts = strsep(&bufp, sep);
+    pr_debug(pr_format("token=%s\n"), mi->mnt_opts);
     if (!mi->mnt_opts) {
         pr_debug(pr_format("cannot parse line %s\n"), bufp);
         return -1;
     }
     const char *s_dump_freq = strsep(&bufp, sep);
+    pr_debug(pr_format("token=%s\n"), s_dump_freq);
     int err = kstrtol(s_dump_freq, 10, &mi->dump_freq);
     if (err) {
         pr_debug(pr_format("cannot convert %s to long\n"), s_dump_freq);
         return err;
     }
     const char *s_fsck_order = strsep(&bufp, sep);
+    pr_debug(pr_format("token=%s\n"), s_fsck_order);
     err = kstrtol(s_fsck_order, 10, &mi->fsck_order);
     if (err) {
         pr_debug(pr_format("cannot convert %s to long\n"), s_fsck_order);
@@ -111,8 +113,9 @@ int init_procfs() {
     }
     while (getline(bufp, 4096L, fp) != NULL) {
         struct mnts_info mi;
-        if (parse_mnts_info(bufp, &mi)) {
-            pr_debug(pr_format("cannot parse %s\n"), bufp);
+        int err = parse_mnts_info(bufp, &mi);
+        if (err) {
+            pr_debug(pr_format("cannot parse %s got error %d\n"), bufp, err);
         } else {
             pr_debug(pr_format("%s %s %s\n"), mi.mnt_dev, mi.fs_type, mi.mnt_point);
         }
