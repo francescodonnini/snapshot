@@ -1,9 +1,10 @@
 #include "include/mounts.h"
 #include "include/pr_format.h"
 #include <linux/fs.h>
+#include <linux/kstrtox.h>
 #include <linux/printk.h>
 #include <linux/string.h>
-#include <linux/kstrtox.h>
+#include <linux/slab.h>
 
 #define BUF_SIZE 4096L
 
@@ -78,8 +79,17 @@ int init_procfs() {
     }
     int err = filp_close(fp, NULL);
     if (err) {
-        pr_debug(pr_fmt("cannot close file mounts"));
+        pr_debug(pr_format("cannot close file mounts"));
         return err;
+    }
+    char *bufp = kmalloc(4096L, GFP_KERNEL);
+    if (!bufp) {
+        pr_debug(pr_format("kmalloc failed\n"));
+        return -ENOMEM;
+    }
+    ssize_t br = kernel_read(fp, bufp, 4096L, &fp->f_pos);
+    if (br) {
+        pr_debug(pr_format("read file %s\n"), bufp);
     }
     return 0;
 }
