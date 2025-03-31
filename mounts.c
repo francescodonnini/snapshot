@@ -38,7 +38,7 @@ static char *getline(char *bufp, ssize_t n, struct file *fp) {
         if (br > line_len) {
             pr_debug(pr_format("current position of file %lld\n"), fp->f_pos);
             pr_debug(pr_format("updating file position to %lld bytes from current position\n"), line_len - br);
-            int err = vfs_llseek(fp, line_len - br, SEEK_CUR);
+            int err = vfs_llseek(fp, line_len - br + 1, SEEK_CUR);
             if (err < 0) {
                 return ERR_PTR(err);
             }
