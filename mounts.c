@@ -32,17 +32,12 @@ static char *getline(char *bufp, ssize_t n, struct file *fp) {
             return ERR_PTR(-1);
         }
         *t = 0;
-        pr_debug(pr_format("found line: %s\n"), bufp);
         loff_t line_len = t - bufp;
-        pr_debug(pr_format("found line of length %ld\n"), t - bufp);
         if (br > line_len) {
-            pr_debug(pr_format("current position of file %lld\n"), fp->f_pos);
-            pr_debug(pr_format("updating file position to %lld bytes from current position\n"), line_len - br);
             int err = vfs_llseek(fp, line_len - br + 1, SEEK_CUR);
             if (err < 0) {
                 return ERR_PTR(err);
             }
-            pr_debug(pr_format("updated position of file %lld\n"), fp->f_pos);
         }
         return bufp;
     } else if (!br) {
@@ -54,41 +49,34 @@ static char *getline(char *bufp, ssize_t n, struct file *fp) {
 
 static int parse_mnts_info(char *bufp, struct mnts_info *mi) {
     bufp = strim(bufp);
-    pr_debug(pr_format("start parsing %s\n"), bufp);
     const char *sep = " \t";
     mi->mnt_dev = strsep(&bufp, sep);
-    pr_debug(pr_format("token=%s\n"), mi->mnt_dev);
     if (!mi->mnt_dev) {
         pr_debug(pr_format("cannot parse line %s\n"), bufp);
         return -1;
     }
     mi->mnt_point = strsep(&bufp, sep);
-    pr_debug(pr_format("token=%s\n"), mi->mnt_point);
     if (!mi->mnt_point) {
         pr_debug(pr_format("cannot parse line %s\n"), bufp);
         return -1;
     }
     mi->fs_type = strsep(&bufp, sep);
-    pr_debug(pr_format("token=%s\n"), mi->fs_type);
     if (!mi->fs_type) {
         pr_debug(pr_format("cannot parse line %s\n"), bufp);
         return -1;
     }
     mi->mnt_opts = strsep(&bufp, sep);
-    pr_debug(pr_format("token=%s\n"), mi->mnt_opts);
     if (!mi->mnt_opts) {
         pr_debug(pr_format("cannot parse line %s\n"), bufp);
         return -1;
     }
     const char *s_dump_freq = strsep(&bufp, sep);
-    pr_debug(pr_format("token=%s\n"), s_dump_freq);
     int err = kstrtol(s_dump_freq, 10, &mi->dump_freq);
     if (err) {
         pr_debug(pr_format("cannot convert %s to long\n"), s_dump_freq);
         return err;
     }
     const char *s_fsck_order = strsep(&bufp, sep);
-    pr_debug(pr_format("token=%s\n"), s_fsck_order);
     err = kstrtol(s_fsck_order, 10, &mi->fsck_order);
     if (err) {
         pr_debug(pr_format("cannot convert %s to long\n"), s_fsck_order);
@@ -120,30 +108,37 @@ int find_mount(const char *dev_name) {
     char *bufp = kmalloc(4096L, GFP_KERNEL);
     if (!bufp) {
         pr_debug(pr_format("kmalloc failed\n"));
-        goto kmalloc_error;
+        int err = filp_close(fp, NULL);
+        if (err) {
+            pr_debug(pr_format("cannot close file mounts"));
+            return err;
+        }
+        return -ENOMEM;
     }
-    int no_mnts = 0;
+    int found = 0;
     char *line;
     while ((line = getline(bufp, 4096L, fp)) != NULL && !IS_ERR(line)) {
-        ++no_mnts;
         struct mnts_info mi;
         int err = parse_mnts_info(bufp, &mi);
         if (err) {
             pr_debug(pr_format("cannot parse %s got error %d\n"), bufp, err);
-        } else {
-            pr_debug(pr_format("%s %s %s\n"), mi.mnt_dev, mi.fs_type, mi.mnt_point);
+        }
+        if (strstr(mi.mnt_dev, "loop") && !strcmp(mi.mnt_point, dev_name)) {
+            found = 1;
+            break;
+        } else if (!strcmp(mi.mnt_dev, dev_name)) {
+            found = 1;
+            break;
         }
     }
     if (IS_ERR(line)) {
         pr_debug(pr_format("cannot complete parsing because of error %ld\n"), PTR_ERR(line));
     }
-    pr_debug(pr_format("found %d mounted devices\n"), no_mnts);
-    return 0;
-kmalloc_error:
+    kfree(bufp);
     int err = filp_close(fp, NULL);
     if (err) {
         pr_debug(pr_format("cannot close file mounts"));
         return err;
     }
-    return -ENOMEM;
+    return found;
 }

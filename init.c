@@ -1,5 +1,6 @@
 #include "include/chrdev.h"
 #include "include/mounts.h"
+#include "include/pr_format.h"
 #include "include/registry.h"
 #include <linux/crypto.h>
 #include <linux/init.h>
@@ -12,7 +13,7 @@ static int __init snapshot_init(void) {
     // chrdev_init();
     // registry_init();
     init_procfs();
-    find_mount("");
+    pr_debug(pr_format("found=%d\n"), find_mount("/home/francesco/Documents/singlefile-FS/mount"));
     return 0;
 }
 
