@@ -31,7 +31,8 @@ static char *getline(char *bufp, ssize_t n, struct file *fp) {
             if (t == NULL) {
                 return ERR_PTR(-1);
             }
-            int err = vfs_llseek(fp, br, SEEK_CUR);
+            loff_t line_end = t - bufp;
+            int err = vfs_llseek(fp, line_end, SEEK_CUR);
             if (err) {
                 return ERR_PTR(err);
             }
@@ -108,15 +109,10 @@ int find_mount(const char *dev_name) {
         pr_debug(pr_format("cannot open /mounts\n"));
         return PTR_ERR(fp);
     }
-    int err = filp_close(fp, NULL);
-    if (err) {
-        pr_debug(pr_format("cannot close file mounts"));
-        return err;
-    }
     char *bufp = kmalloc(4096L, GFP_KERNEL);
     if (!bufp) {
         pr_debug(pr_format("kmalloc failed\n"));
-        return -ENOMEM;
+        goto kmalloc_error;
     }
     while (getline(bufp, 4096L, fp) != NULL) {
         struct mnts_info mi;
@@ -128,4 +124,11 @@ int find_mount(const char *dev_name) {
         }
     }
     return 0;
+kmalloc_error:
+    int err = filp_close(fp, NULL);
+    if (err) {
+        pr_debug(pr_format("cannot close file mounts"));
+        return err;
+    }
+    return -ENOMEM;
 }
