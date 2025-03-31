@@ -9,7 +9,9 @@ static const char *snapshot_strerror(int err) {
     case -5001:
         return "device name is too long";
     case -5002:
-        return "device name or password are wrong";   
+        return "device name or password are wrong";
+    case -5003:
+        return "device is already mounted";
     default:
         return "unknown error";
     }
