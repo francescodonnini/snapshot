@@ -119,7 +119,7 @@ int find_mount(const char *dev_name) {
     }
     int escape = 0;
     char *line;
-    while ((line = getline(bufp, 4096L, fp)) != NULL) {
+    while ((line = getline(bufp, 4096L, fp)) != NULL && !IS_ERR(line)) {
         if (++escape > 256) {
             break;
         }
