@@ -111,11 +111,11 @@ static int get_file_size(struct file *fp, size_t *size) {
  * then it is necessary to check with IS_ERR(). The pointer embeds an error code if it was not possible
  * to allocate enough memory to contain the entire file or if some error occurs while reading the file.
  */
-static char* read_mounts_file() {
+static char* read_mounts_file(void) {
     struct file *fp = file_open_root_mnt(mnt, "mounts", O_RDONLY, 0);
     if (IS_ERR(fp)) {
         pr_debug(pr_format("cannot open /proc/mounts\n"));
-        return PTR_ERR(fp);
+        return ERR_PTR(PTR_ERR(fp));
     }
     size_t buf_size;
     int err = get_file_size(fp, &buf_size);
