@@ -5,6 +5,7 @@
 **/*.mod.cmd
 **/*.mod.o
 **/*.o
+**/*.o.d
 **/*.o.cmd
 **/*.order
 **/*.order.cmd
