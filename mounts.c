@@ -3,11 +3,9 @@
 #include <linux/fs.h>
 #include <linux/kstrtox.h>
 #include <linux/printk.h>
+#include <linux/sprintf.h>
 #include <linux/string.h>
 #include <linux/slab.h>
-#include <linux/types.h>
-
-#define BUF_SIZE 4096L
 
 struct mnts_info {
     const char *mnt_dev;
@@ -19,71 +17,6 @@ struct mnts_info {
 };
 
 struct vfsmount *mnt;
-
-static char *getline(char *bufp, ssize_t n, struct file *fp) {
-    --n;
-    if (n <= 0) {
-        return NULL;
-    }
-    ssize_t br = kernel_read(fp, bufp, n, &fp->f_pos);
-    if (br) {
-        char *t = strchr(bufp, '\n');
-        if (t == NULL) {
-            return ERR_PTR(-1);
-        }
-        *t = 0;
-        loff_t line_len = t - bufp;
-        if (br > line_len) {
-            int err = vfs_llseek(fp, line_len - br + 1, SEEK_CUR);
-            if (err < 0) {
-                return ERR_PTR(err);
-            }
-        }
-        return bufp;
-    } else if (!br) {
-        return NULL;
-    } else {
-        return ERR_PTR(br);
-    }
-}
-
-static int parse_mnts_info(char *bufp, struct mnts_info *mi) {
-    bufp = strim(bufp);
-    const char *sep = " \t";
-    mi->mnt_dev = strsep(&bufp, sep);
-    if (!mi->mnt_dev) {
-        pr_debug(pr_format("cannot parse line %s\n"), bufp);
-        return -1;
-    }
-    mi->mnt_point = strsep(&bufp, sep);
-    if (!mi->mnt_point) {
-        pr_debug(pr_format("cannot parse line %s\n"), bufp);
-        return -1;
-    }
-    mi->fs_type = strsep(&bufp, sep);
-    if (!mi->fs_type) {
-        pr_debug(pr_format("cannot parse line %s\n"), bufp);
-        return -1;
-    }
-    mi->mnt_opts = strsep(&bufp, sep);
-    if (!mi->mnt_opts) {
-        pr_debug(pr_format("cannot parse line %s\n"), bufp);
-        return -1;
-    }
-    const char *s_dump_freq = strsep(&bufp, sep);
-    int err = kstrtol(s_dump_freq, 10, &mi->dump_freq);
-    if (err) {
-        pr_debug(pr_format("cannot convert %s to long\n"), s_dump_freq);
-        return err;
-    }
-    const char *s_fsck_order = strsep(&bufp, sep);
-    err = kstrtol(s_fsck_order, 10, &mi->fsck_order);
-    if (err) {
-        pr_debug(pr_format("cannot convert %s to long\n"), s_fsck_order);
-        return err;
-    }
-    return 0;
-}
 
 int init_procfs() {
     struct file_system_type *fs_type = get_fs_type("proc");
@@ -99,35 +32,159 @@ int init_procfs() {
     return 0;
 }
 
-int find_mount(const char *dev_name) {
+static int parse_mnts_info(char *line, struct mnts_info *mi) {
+    line = strim(line);
+    const char *sep = " \t";
+    mi->mnt_dev = strsep(&line, sep);
+    if (!mi->mnt_dev) {
+        pr_debug(pr_format("cannot parse line %s\n"), line);
+        return -1;
+    }
+    mi->mnt_point = strsep(&line, sep);
+    if (!mi->mnt_point) {
+        pr_debug(pr_format("cannot parse line %s\n"), line);
+        return -1;
+    }
+    mi->fs_type = strsep(&line, sep);
+    if (!mi->fs_type) {
+        pr_debug(pr_format("cannot parse line %s\n"), line);
+        return -1;
+    }
+    mi->mnt_opts = strsep(&line, sep);
+    if (!mi->mnt_opts) {
+        pr_debug(pr_format("cannot parse line %s\n"), line);
+        return -1;
+    }
+    const char *s_dump_freq = strsep(&line, sep);
+    int err = kstrtol(s_dump_freq, 10, &mi->dump_freq);
+    if (err) {
+        pr_debug(pr_format("cannot convert %s to long\n"), s_dump_freq);
+        return err;
+    }
+    const char *s_fsck_order = strsep(&line, sep);
+    err = kstrtol(s_fsck_order, 10, &mi->fsck_order);
+    if (err) {
+        pr_debug(pr_format("cannot convert %s to long\n"), s_fsck_order);
+        return err;
+    }
+    return 0;
+}
+
+/**
+ * getline - read a string until either new line '\n' or the NULL '\0' are met. It updates rp
+ * to the position of the character following '\n' or the end of the string.
+ * @param rp - the position to start the reading. If '\n' is met, rp gets updated to the position
+ * following it, if no '\n' is met, then rp is updated to the position of the NULL character.
+ * @returns the old value of rp (before the update) if '\n' is met, NULL otherwise.
+ */
+static char *getline(char **rp) {
+    char *cp = *rp;
+    if (!cp) {
+        return NULL;
+    }
+    char *t = strchr(cp, '\n');
+    if (t == NULL) {
+        return ERR_PTR(-1); // EOF met too early
+    }
+    *t = 0;
+    // '\n' met so there is at least one character to read ('\0')
+    *rp = t+1;
+    return cp;
+}
+
+static int get_file_size(struct file *fp, size_t *size) {
+    loff_t off = vfs_llseek(fp, 0, SEEK_END);
+    if (off < 0) {
+        return off;
+    }
+    *size = off;
+    off = vfs_llseek(fp, 0, SEEK_SET);
+    if (off < 0) {
+        return off;
+    }
+    return 0;
+}
+
+/**
+ * read_mounts_file - returns a buffer containing the content of /proc/mounts.
+ * @returns NULL if the file is empty, a non-NULL pointer otherwise. If the pointer is not NULL
+ * then it is necessary to check with IS_ERR(). The pointer embeds an error code if it was not possible
+ * to allocate enough memory to contain the entire file or if some error occurs while reading the file.
+ */
+static char* read_mounts_file() {
     struct file *fp = file_open_root_mnt(mnt, "mounts", O_RDONLY, 0);
     if (IS_ERR(fp)) {
-        pr_debug(pr_format("cannot open /mounts\n"));
+        pr_debug(pr_format("cannot open /proc/mounts\n"));
         return PTR_ERR(fp);
     }
-    char *bufp = kmalloc(4096L, GFP_KERNEL);
+    size_t buf_size;
+    int err = get_file_size(fp, &buf_size);
+    if (err) {
+        pr_debug(pr_format("cannot get size of file /proc/mounts because of error %d\n"), err);
+        goto close_file;
+    }
+    if (!buf_size) {
+        pr_debug(pr_format("file /proc/mounts is empty\n"));
+        return NULL;
+    }
+    // buf_size gets incremented because the buffer should contain the NUL-character
+    char *bufp = kmalloc(++buf_size, GFP_KERNEL);
     if (!bufp) {
         pr_debug(pr_format("kmalloc failed\n"));
-        int err = filp_close(fp, NULL);
-        if (err) {
-            pr_debug(pr_format("cannot close file mounts"));
-            return err;
-        }
-        return -ENOMEM;
+        return ERR_PTR(-ENOMEM);
     }
-    int found = 0;
+    ssize_t n = kernel_read(fp, bufp, buf_size, &fp->f_pos);
+    if (n <= 0) {
+        pr_debug(pr_format("cannot read file /proc/mounts because of error %ld\n"), n);
+        err = n;
+        goto close_file;
+    } else if (n < buf_size - 1) {
+        pr_debug(pr_format("cannot read entire file /proc/mounts\n"));
+        err = -1;
+        goto close_file;
+    }
+    bufp[n] = 0;
+    return bufp;
+close_file:
+    kfree(bufp);
+    int err2 = filp_close(fp, NULL);
+    if (err2) {
+        pr_debug(pr_format("cannot close file /proc/mounts"));
+        return ERR_PTR(err2);
+    }
+    return ERR_PTR(err);
+}
+
+/**
+ * find_mount - look if a device is already mounted at dev_name path
+ * @param dev_name
+ * @param found
+ * @returns 0 if the search was successfull - i.e. the function was able to find the device or to look for all
+ * of them. < 0 is some error occurred.
+ */
+int find_mount(const char *dev_name, bool *found) {
+    *found = false;
+    char *bufp = read_mounts_file();
+    if (!bufp) {
+        return 0;
+    } else if (IS_ERR(bufp)) {
+        return PTR_ERR(bufp);
+    }
     char *line;
-    while ((line = getline(bufp, 4096L, fp)) != NULL && !IS_ERR(line)) {
+    char *rp = bufp;
+    while ((line = getline(&rp)) != NULL && !IS_ERR(line)) {
         struct mnts_info mi;
-        int err = parse_mnts_info(bufp, &mi);
+        err = parse_mnts_info(bufp, &mi);
         if (err) {
-            pr_debug(pr_format("cannot parse %s got error %d\n"), bufp, err);
+            pr_debug(pr_format("cannot parse %s got error %d\n"), line, err);
+            break;
         }
         if (strstr(mi.mnt_dev, "loop") && !strcmp(mi.mnt_point, dev_name)) {
-            found = 1;
+            *found = true;
             break;
-        } else if (!strcmp(mi.mnt_dev, dev_name)) {
-            found = 1;
+        }
+        if (!strcmp(mi.mnt_dev, dev_name)) {
+            *found = true;
             break;
         }
     }
@@ -135,10 +192,5 @@ int find_mount(const char *dev_name) {
         pr_debug(pr_format("cannot complete parsing because of error %ld\n"), PTR_ERR(line));
     }
     kfree(bufp);
-    int err = filp_close(fp, NULL);
-    if (err) {
-        pr_debug(pr_format("cannot close file mounts"));
-        return err;
-    }
-    return found;
+    return err;
 }
