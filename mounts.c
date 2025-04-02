@@ -170,6 +170,7 @@ int find_mount(const char *dev_name, bool *found) {
     } else if (IS_ERR(bufp)) {
         return PTR_ERR(bufp);
     }
+    int err;
     char *line;
     char *rp = bufp;
     while ((line = getline(&rp)) != NULL && !IS_ERR(line)) {
@@ -190,6 +191,7 @@ int find_mount(const char *dev_name, bool *found) {
     }
     if (IS_ERR(line)) {
         pr_debug(pr_format("cannot complete parsing because of error %ld\n"), PTR_ERR(line));
+        err = PTR_ERR(line);
     }
     kfree(bufp);
     return err;
