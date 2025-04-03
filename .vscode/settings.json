@@ -3,7 +3,8 @@
         "kernel_read_file.h": "c",
         "mounts.h": "c",
         "sprintf.h": "c",
-        "types.h": "c"
+        "types.h": "c",
+        "chrdev.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
     "makefile.configureOnOpen": true,

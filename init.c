@@ -12,6 +12,7 @@
 static int __init snapshot_init(void) {
     chrdev_init();
     registry_init();
+    procfs_init();
     return 0;
 }
 

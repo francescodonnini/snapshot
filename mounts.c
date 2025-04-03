@@ -7,6 +7,11 @@
 #include <linux/string.h>
 #include <linux/slab.h>
 
+#define BUFIO_EOF -1
+
+/**
+ * Facility to hold the fields of a row read from /proc/mounts file
+ */
 struct mnts_info {
     const char *mnt_dev;
     const char *mnt_point;
@@ -16,9 +21,24 @@ struct mnts_info {
     long       fsck_order;
 };
 
+/**
+ * Facility to read the content inside a file in a buffered-way.
+ * - bufp is the internal buffer used to store chunks of the file
+ * - rp is the read position inside the internal buffer (the next character to be read)
+ * - size is the amount of valid bytes inside the internall buffer
+ * - capacity is the real size of the buffer, no more than this characters could be read from the file
+ */
+struct bufio {
+    struct file *fp;
+    char        *bufp;
+    size_t      rp;
+    size_t      size;
+    size_t      capacity;
+};
+
 struct vfsmount *mnt;
 
-int init_procfs() {
+int procfs_init() {
     struct file_system_type *fs_type = get_fs_type("proc");
     if (!fs_type) {
         pr_debug(pr_format("cannot find procfs\n"));
@@ -71,88 +91,76 @@ static int parse_mnts_info(char *line, struct mnts_info *mi) {
 }
 
 /**
- * getline - read a string until either new line '\n' or the NULL '\0' are met. It updates rp
- * to the position of the character following '\n' or the end of the string.
- * @param rp - the position to start the reading. If '\n' is met, rp gets updated to the position
- * following it, if no '\n' is met, then rp is updated to the position of the NULL character.
- * @returns the old value of rp (before the update) if '\n' is met, NULL otherwise.
+ * bufio_refill - refills the buffer reading new bytes from the file.
+ * @param ff facility to read the bytes of a file
+ * Returns:
+ * 
+ * - > 0 if some bytes are successfully read from the file;
+ * 
+ * - 0 if no bytes remaining;
+ * 
+ * - < 0 if some error occurred while reading from the file.
  */
-static char *getline(char **rp) {
-    char *cp = *rp;
-    if (!cp) {
-        return NULL;
+static ssize_t bufio_refill(struct bufio *ff) {
+    ssize_t bytes_read = kernel_read(ff->fp, ff->bufp, ff->capacity, &ff->fp->f_pos);
+    if (bytes_read < 0) {
+        return bytes_read;
     }
-    char *t = strchr(cp, '\n');
-    if (t == NULL) {
-        return ERR_PTR(-1); // EOF met too early
-    }
-    *t = 0;
-    // '\n' met so there is at least one character to read ('\0')
-    *rp = t+1;
-    return cp;
-}
-
-static int get_file_size(struct file *fp, size_t *size) {
-    loff_t off = vfs_llseek(fp, 0, SEEK_END);
-    if (off < 0) {
-        return off;
-    }
-    *size = off;
-    off = vfs_llseek(fp, 0, SEEK_SET);
-    if (off < 0) {
-        return off;
-    }
-    return 0;
+    ff->bufp[bytes_read] = 0;
+    ff->rp = 0;
+    ff->size = bytes_read;
+    return bytes_read;
 }
 
 /**
- * read_mounts_file - returns a buffer containing the content of /proc/mounts.
- * @returns NULL if the file is empty, a non-NULL pointer otherwise. If the pointer is not NULL
- * then it is necessary to check with IS_ERR(). The pointer embeds an error code if it was not possible
- * to allocate enough memory to contain the entire file or if some error occurs while reading the file.
+ * bufio_getc - reads a character from the file. A good chunk of the file
+ * is pre-saved in a buffer to reduce the number of times kernel_read gets called.
+ * @param ff facility to read the bytes of a file
+ * Returns the character read if successfull, a negative value otherwise.
  */
-static char* read_mounts_file(void) {
-    struct file *fp = file_open_root_mnt(mnt, "mounts", O_RDONLY, 0);
-    if (IS_ERR(fp)) {
-        pr_debug(pr_format("cannot open /proc/mounts\n"));
-        return ERR_PTR(PTR_ERR(fp));
+static int bufio_getc(struct bufio *ff) {
+    if (ff->rp >= ff->size) {
+        ssize_t err = bufio_refill(ff);
+        if (err < 0) {
+            return err;
+        } else if (!err) {
+            // err == 0 means there are no bytes left to read from the file
+            return BUFIO_EOF;
+        }
     }
-    size_t buf_size;
-    int err = get_file_size(fp, &buf_size);
-    if (err) {
-        pr_debug(pr_format("cannot get size of file /proc/mounts because of error %d\n"), err);
-        goto close_file;
-    }
-    if (!buf_size) {
-        pr_debug(pr_format("file /proc/mounts is empty\n"));
+    return ff->bufp[ff->rp++];
+}
+
+/**
+ * bufio_fgets - reads up to n bytes or until '\n' is met.
+ * @param dst buffer where characters read from ff are copied to
+ * @param n   max number of bytes expected in a line
+ * @param ff  facility to read bytes from a file in a buffered way
+ * Returns @param dst if an entire line has been read, otherwise NULL, which means
+ * either n bytes are read and no '\n' was met or all the file was read and no '\n' was met.
+ */
+static char *bufio_fgets(char *dst, size_t n, struct bufio *ff) {
+    if (n <= 0) {
         return NULL;
     }
-    // buf_size gets incremented because the buffer should contain the NUL-character
-    char *bufp = kmalloc(++buf_size, GFP_KERNEL);
-    if (!bufp) {
-        pr_debug(pr_format("kmalloc failed\n"));
-        return ERR_PTR(-ENOMEM);
+    --n; // make space for '\0' character
+    char *linp = dst;
+    while (n-- > 0) {
+        int c = bufio_getc(ff);
+        if (c <= 0) {
+            // '\0' character is really unexpected in an ASCII file
+            if (c == BUFIO_EOF || !c) {
+                return NULL;
+            }
+            return ERR_PTR(c);
+        } else if (c == '\n') {
+            *linp = 0;
+            return dst;
+        } else {
+            *linp++ = c;
+        }
     }
-    ssize_t n = kernel_read(fp, bufp, buf_size, &fp->f_pos);
-    if (n <= 0) {
-        pr_debug(pr_format("cannot read file /proc/mounts because of error %ld\n"), n);
-        err = n;
-        goto close_file;
-    } else if (n < buf_size - 1) {
-        pr_debug(pr_format("cannot read entire file /proc/mounts\n"));
-        err = -1;
-        goto close_file;
-    }
-    bufp[n] = 0;
-    return bufp;
-close_file:
-    kfree(bufp);
-    int err2 = filp_close(fp, NULL);
-    if (err2) {
-        pr_debug(pr_format("cannot close file /proc/mounts"));
-        return ERR_PTR(err2);
-    }
-    return ERR_PTR(err);
+    return NULL;
 }
 
 /**
@@ -164,18 +172,35 @@ close_file:
  */
 int find_mount(const char *dev_name, bool *found) {
     *found = false;
-    char *bufp = read_mounts_file();
+    const size_t LINE_BUFSZ = 512;
+    const size_t FILE_BUFSZ = 1024;
+    // common memory pool to buffer both file content and the line read
+    char *bufp = kmalloc(LINE_BUFSZ + FILE_BUFSZ, GFP_KERNEL);
     if (!bufp) {
-        return 0;
-    } else if (IS_ERR(bufp)) {
-        return PTR_ERR(bufp);
+        pr_debug(pr_format("cannot make enough space to parse /proc/mounts file\n"));
+        return -ENOMEM;
     }
-    int err;
+    char *file_bufp = bufp;
+    char *line_bufp = &bufp[FILE_BUFSZ];
+    struct file *fp = file_open_root_mnt(mnt, "mounts", O_RDONLY, 0);
+    if (IS_ERR(fp)) {
+        pr_debug(pr_format("cannot open file /proc/mounts because of error %ld\n"), PTR_ERR(fp));
+        kfree(bufp);
+        return PTR_ERR(fp);
+    }
+    struct bufio ff = {
+        .bufp = file_bufp,
+        .capacity = FILE_BUFSZ,
+        .fp = fp,
+        .rp = 0,
+        .size = 0
+    };
+    int err = 0;
     char *line;
-    char *rp = bufp;
-    while ((line = getline(&rp)) != NULL && !IS_ERR(line)) {
+    while ((line = bufio_fgets(line_bufp, LINE_BUFSZ, &ff)) != NULL && !IS_ERR(line)) {
         struct mnts_info mi;
-        err = parse_mnts_info(bufp, &mi);
+        err = parse_mnts_info(line, &mi);
+        pr_debug(pr_format("device=\"%s\"\tmount point=\"%s\"\n"), mi.mnt_dev, mi.mnt_point);
         if (err) {
             pr_debug(pr_format("cannot parse %s got error %d\n"), line, err);
             break;
@@ -192,6 +217,10 @@ int find_mount(const char *dev_name, bool *found) {
     if (IS_ERR(line)) {
         pr_debug(pr_format("cannot complete parsing because of error %ld\n"), PTR_ERR(line));
         err = PTR_ERR(line);
+    }
+    int err2 = filp_close(fp, NULL);
+    if (err2 < 0) {
+        pr_debug(pr_format("cannot close file /proc/mounts because of error %d\n"), err2);
     }
     kfree(bufp);
     return err;
