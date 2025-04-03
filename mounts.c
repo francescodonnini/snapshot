@@ -53,7 +53,7 @@ int procfs_init(void) {
 }
 
 void procfs_cleanup(void) {
-    kern_unmount(&procfs_mnt);
+    kern_unmount(procfs_mnt);
 }
 
 /**
@@ -68,11 +68,12 @@ void procfs_cleanup(void) {
  * - < 0 if some error occurred while reading from the file.
  */
 static ssize_t bufio_refill(struct bufio *ff) {
-    ssize_t bytes_read = kernel_read(ff->fp, ff->bufp, ff->capacity, &ff->fp->f_pos);
+    struct file *fp = ff->fp;
+    ssize_t bytes_read = kernel_read(fp, ff->bufp, ff->capacity, &fp->f_pos);
     if (bytes_read < 0) {
+        pr_debug(pr_format("refill() failed\n"));
         return bytes_read;
     }
-    ff->bufp[bytes_read] = 0;
     ff->rp = 0;
     ff->size = bytes_read;
     return bytes_read;
@@ -89,7 +90,7 @@ static int bufio_getc(struct bufio *ff) {
         ssize_t err = bufio_refill(ff);
         if (err < 0) {
             return err;
-        } else if (!err) {
+        } else if (err == 0) {
             // err == 0 means there are no bytes left to read from the file
             return BUFIO_EOF;
         }
