@@ -25,7 +25,7 @@ struct mnts_info {
  * Facility to read the content inside a file in a buffered-way.
  * - bufp is the internal buffer used to store chunks of the file
  * - rp is the read position inside the internal buffer (the next character to be read)
- * - size is the amount of valid bytes inside the internall buffer
+ * - size is the amount of valid bytes inside the internal buffer
  * - capacity is the real size of the buffer, no more than this characters could be read from the file
  */
 struct bufio {
