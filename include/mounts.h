@@ -4,6 +4,8 @@
 
 int procfs_init(void);
 
+void procfs_cleanup(void);
+
 int find_mount(const char *dev_name, bool *found);
 
 #endif

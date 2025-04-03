@@ -36,58 +36,24 @@ struct bufio {
     size_t      capacity;
 };
 
-struct vfsmount *mnt;
+struct vfsmount *procfs_mnt;
 
-int procfs_init() {
+int procfs_init(void) {
     struct file_system_type *fs_type = get_fs_type("proc");
     if (!fs_type) {
         pr_debug(pr_format("cannot find procfs\n"));
         return -1;
     }
-    mnt = kern_mount(fs_type);
-    if (IS_ERR(mnt)) {
+    procfs_mnt = kern_mount(fs_type);
+    if (IS_ERR(procfs_mnt)) {
         pr_debug(pr_format("cannot mount procfs\n"));
-        return PTR_ERR(mnt);
+        return PTR_ERR(procfs_mnt);
     }
     return 0;
 }
 
-static int parse_mnts_info(char *line, struct mnts_info *mi) {
-    line = strim(line);
-    const char *sep = " \t";
-    mi->mnt_dev = strsep(&line, sep);
-    if (!mi->mnt_dev) {
-        pr_debug(pr_format("cannot parse line %s\n"), line);
-        return -1;
-    }
-    mi->mnt_point = strsep(&line, sep);
-    if (!mi->mnt_point) {
-        pr_debug(pr_format("cannot parse line %s\n"), line);
-        return -1;
-    }
-    mi->fs_type = strsep(&line, sep);
-    if (!mi->fs_type) {
-        pr_debug(pr_format("cannot parse line %s\n"), line);
-        return -1;
-    }
-    mi->mnt_opts = strsep(&line, sep);
-    if (!mi->mnt_opts) {
-        pr_debug(pr_format("cannot parse line %s\n"), line);
-        return -1;
-    }
-    const char *s_dump_freq = strsep(&line, sep);
-    int err = kstrtol(s_dump_freq, 10, &mi->dump_freq);
-    if (err) {
-        pr_debug(pr_format("cannot convert %s to long\n"), s_dump_freq);
-        return err;
-    }
-    const char *s_fsck_order = strsep(&line, sep);
-    err = kstrtol(s_fsck_order, 10, &mi->fsck_order);
-    if (err) {
-        pr_debug(pr_format("cannot convert %s to long\n"), s_fsck_order);
-        return err;
-    }
-    return 0;
+void procfs_cleanup(void) {
+    kern_unmount(&procfs_mnt);
 }
 
 /**
@@ -132,14 +98,14 @@ static int bufio_getc(struct bufio *ff) {
 }
 
 /**
- * bufio_fgets - reads up to n bytes or until '\n' is met.
+ * bufio_getline - reads up to n bytes or until '\n' is met.
  * @param dst buffer where characters read from ff are copied to
  * @param n   max number of bytes expected in a line
  * @param ff  facility to read bytes from a file in a buffered way
  * Returns @param dst if an entire line has been read, otherwise NULL, which means
  * either n bytes are read and no '\n' was met or all the file was read and no '\n' was met.
  */
-static char *bufio_fgets(char *dst, size_t n, struct bufio *ff) {
+static char *bufio_getline(char *dst, size_t n, struct bufio *ff) {
     if (n <= 0) {
         return NULL;
     }
@@ -164,6 +130,53 @@ static char *bufio_fgets(char *dst, size_t n, struct bufio *ff) {
 }
 
 /**
+ * parse_mnts_info - reads a line into a mnts_info record.
+ * @param line line of text read from /proc/mounts
+ * @param mi   record to hold the fields of a line of the file /proc/mounts
+ * A line is a string of six words separated by by blanks (' ' or '\t'). 
+ * Returns 0 if the parsing completed successfully, < 0 if some error occurred. Specifically:
+ * -1 if some field is missing or one of -ERANGE or -EINVAL if the last two numeric fields are malformed -i.e.
+ * kstrtol() failed.
+ */
+static int parse_mnts_info(char *line, struct mnts_info *mi) {
+    line = strim(line);
+    const char *sep = " \t";
+    mi->mnt_dev = strsep(&line, sep);
+    if (!mi->mnt_dev) {
+        pr_debug(pr_format("cannot parse line %s\n"), line);
+        return -1;
+    }
+    mi->mnt_point = strsep(&line, sep);
+    if (!mi->mnt_point) {
+        pr_debug(pr_format("cannot parse line %s\n"), line);
+        return -1;
+    }
+    mi->fs_type = strsep(&line, sep);
+    if (!mi->fs_type) {
+        pr_debug(pr_format("cannot parse line %s\n"), line);
+        return -1;
+    }
+    mi->mnt_opts = strsep(&line, sep);
+    if (!mi->mnt_opts) {
+        pr_debug(pr_format("cannot parse line %s\n"), line);
+        return -1;
+    }
+    const char *s_dump_freq = strsep(&line, sep);
+    int err = kstrtol(s_dump_freq, 10, &mi->dump_freq);
+    if (err) {
+        pr_debug(pr_format("cannot convert %s to long\n"), s_dump_freq);
+        return err;
+    }
+    const char *s_fsck_order = strsep(&line, sep);
+    err = kstrtol(s_fsck_order, 10, &mi->fsck_order);
+    if (err) {
+        pr_debug(pr_format("cannot convert %s to long\n"), s_fsck_order);
+        return err;
+    }
+    return 0;
+}
+
+/**
  * find_mount - look if a device is already mounted at dev_name path
  * @param dev_name
  * @param found
@@ -173,7 +186,7 @@ static char *bufio_fgets(char *dst, size_t n, struct bufio *ff) {
 int find_mount(const char *dev_name, bool *found) {
     *found = false;
     const size_t LINE_BUFSZ = 512;
-    const size_t FILE_BUFSZ = 1024;
+    const size_t FILE_BUFSZ = 1536;
     // common memory pool to buffer both file content and the line read
     char *bufp = kmalloc(LINE_BUFSZ + FILE_BUFSZ, GFP_KERNEL);
     if (!bufp) {
@@ -182,7 +195,7 @@ int find_mount(const char *dev_name, bool *found) {
     }
     char *file_bufp = bufp;
     char *line_bufp = &bufp[FILE_BUFSZ];
-    struct file *fp = file_open_root_mnt(mnt, "mounts", O_RDONLY, 0);
+    struct file *fp = file_open_root_mnt(procfs_mnt, "mounts", O_RDONLY, 0);
     if (IS_ERR(fp)) {
         pr_debug(pr_format("cannot open file /proc/mounts because of error %ld\n"), PTR_ERR(fp));
         kfree(bufp);
@@ -197,10 +210,9 @@ int find_mount(const char *dev_name, bool *found) {
     };
     int err = 0;
     char *line;
-    while ((line = bufio_fgets(line_bufp, LINE_BUFSZ, &ff)) != NULL && !IS_ERR(line)) {
+    while ((line = bufio_getline(line_bufp, LINE_BUFSZ, &ff)) != NULL && !IS_ERR(line)) {
         struct mnts_info mi;
         err = parse_mnts_info(line, &mi);
-        pr_debug(pr_format("device=\"%s\"\tmount point=\"%s\"\n"), mi.mnt_dev, mi.mnt_point);
         if (err) {
             pr_debug(pr_format("cannot parse %s got error %d\n"), line, err);
             break;
@@ -221,6 +233,11 @@ int find_mount(const char *dev_name, bool *found) {
     int err2 = filp_close(fp, NULL);
     if (err2 < 0) {
         pr_debug(pr_format("cannot close file /proc/mounts because of error %d\n"), err2);
+        // if the parsing completed successfully but there was an error while closing
+        // the file we should report this
+        if (!err) {
+            err = err2;
+        }
     }
     kfree(bufp);
     return err;

@@ -3,6 +3,7 @@
 #include <linux/types.h>
 
 int chrdev_init(void);
+
 void chrdev_cleanup(void);
 
 #endif
