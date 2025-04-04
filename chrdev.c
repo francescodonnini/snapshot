@@ -30,6 +30,9 @@ static int my_uevent(const struct device *dev, __attribute__((unused)) struct ko
     return 0;
 }
 
+/**
+ * chrdev_init - create a device to handle ioctl operations from user space.
+ */
 int chrdev_init(void) {
     int err = alloc_chrdev_region(&device.dev, 0, 1, MY_CHRDEV_NAME);
     if (err) {
@@ -38,6 +41,7 @@ int chrdev_init(void) {
     }
     
     cdev_init(&device.cdev, &chrdev_fops);
+    device.cdev.owner = THIS_MODULE;
     err = cdev_add(&device.cdev, device.dev, 1);
     if (err) {
         pr_debug(pr_format("cannot add device with number (%d, %d) because of error %d\n"), MAJOR(device.dev), MINOR(device.dev), err);
