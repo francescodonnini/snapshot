@@ -1,5 +1,5 @@
 obj-m += snapshot.o
-snapshot-objs := activate_snapshot.o chrdev_ioctl.o chrdev.o deactivate_snapshot.o exit.o hash.o init.o registry.o mounts.o
+snapshot-objs := activate_snapshot.o chrdev_ioctl.o chrdev.o deactivate_snapshot.o exit.o hash.o init.o registry.o find_mount.o
 
 PWD := $(CURDIR) 
 
@@ -10,7 +10,7 @@ CFLAGS_deactivate_snapshot.o += -DDEBUG
 CFLAGS_hash.o += -DDEBUG
 CFLAGS_init.o += -DDEBUG
 CFLAGS_registry.o += -DDEBUG
-CFLAGS_mounts.o += -DDEBUG
+CFLAGS_find_mount.o += -DDEBUG
 
 all: 
 		make -C /lib/modules/$(shell uname -r)/build M=$(PWD)  modules 

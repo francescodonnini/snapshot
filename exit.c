@@ -1,5 +1,5 @@
 #include "include/chrdev.h"
-#include "include/mounts.h"
+#include "include/find_mount.h"
 #include "include/registry.h"
 #include <linux/init.h>
 #include <linux/module.h>
