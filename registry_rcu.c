@@ -107,7 +107,7 @@ int registry_insert(const char *dev_name, const char *password) {
     if (IS_ERR(ep)) {
         return PTR_ERR(ep);
     }
-    long flags;
+    unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
     int err = try_add(ep);
     spin_unlock_irqrestore(&write_lock, flags);
@@ -131,7 +131,7 @@ static bool check_password(const char *pw_hash, const char *password) {
  * @return -EWRONGCRED if the password or the device name are wrong, 0 otherwise 
  */
 int registry_delete(const char *dev_name, const char *password) {
-    long flags;
+    unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
     struct registry_entity *ep = get_raw(dev_name);
     int err = -EWRONGCRED;

@@ -68,12 +68,7 @@ int hash2(const char *alg_name, const char *key, int key_len, char *out) {
         goto free_shash;
     }
     desc->tfm = alg;
-    size_t digest_size = crypto_shash_digestsize(alg);
     err = crypto_shash_digest(desc, key, key_len, out);
-    if (err < 0) {
-        goto free_desc;
-    }
-free_desc:
     kfree(desc);
 free_shash:
     crypto_free_shash(desc->tfm);
