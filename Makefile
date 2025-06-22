@@ -22,8 +22,6 @@ CFLAGS_hash.o += -DDEBUG
 CFLAGS_init.o += -DDEBUG
 CFLAGS_registry_rcu.o += -DDEBUG
 CFLAGS_find_mount.o += -DDEBUG
-CFLAGS_vfs_write_ph.o += -DDEBUG
-CFLAGS_mount_bdev_ph.o += -DDEBUG
 CFLAGS_probes.o += -DDEBUG
 
 all: 

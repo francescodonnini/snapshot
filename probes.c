@@ -6,11 +6,11 @@
 #include <linux/kprobes.h>
 #include <linux/list.h>
 
-static struct kprobe KPROBES_TABLE[] = {
+static struct kprobe kprobes_table[] = {
     {.symbol_name="vfs_write", .pre_handler=vfs_write_pre_handler},
     {.symbol_name="mount_bdev", .pre_handler=mount_bdev_pre_handler},
 };
-static size_t KPROBES_TABLE_SIZE = (sizeof(KPROBES_TABLE) / sizeof(struct kprobe));
+static size_t KPROBES_NUM = (sizeof(kprobes_table) / sizeof(struct kprobe));
 
 static int try_register(struct kprobe *kp) {
     int err = register_kprobe(kp);
@@ -28,21 +28,19 @@ static void unregister(struct kprobe *table, int n) {
 
 int probes_init(void) {
     int i, err = 0;
-    for (i = 0; i < KPROBES_TABLE_SIZE; ++i) {
-        err = try_register(&KPROBES_TABLE[i]);
-        if (err) {
-            break;
-        }
+    for (i = 0; i < KPROBES_NUM && !err; ++i) {
+        err = try_register(&kprobes_table[i]);
     }
     if (err) {
-        unregister(KPROBES_TABLE, i);
-        return err;
+        unregister(kprobes_table, i);
+        return 0;
     }
+    pr_debug(pr_format("all kprobes have been registered successfully!"));
     return 0;
 }
 
 static void unregister_all(void) {
-    unregister(KPROBES_TABLE, KPROBES_TABLE_SIZE - 1);
+    unregister(kprobes_table, KPROBES_NUM);
 }
 
 void probes_cleanup(void) {

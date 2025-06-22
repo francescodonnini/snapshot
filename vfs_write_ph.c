@@ -23,10 +23,11 @@ static inline int get_file_pointer(struct pt_regs *regs, struct file **fp) {
 int vfs_write_pre_handler(struct kprobe *kp, struct pt_regs *regs) {
     struct file *fp;
     if (get_file_pointer(regs, &fp)) {
-        return -1;
+        return 0;
     }
     struct vfsmount *mnt = fp->f_path.mnt;
     struct super_block *sb = mnt->mnt_sb;
     pr_debug(pr_format("vfs_write called on device %s (%s)\n"), sb->s_type->name, sb->s_root->d_name.name);
-    return -1;
+    pr_debug(pr_format("vfs_write called"));
+    return 0;
 }

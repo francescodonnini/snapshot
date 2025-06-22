@@ -3,5 +3,5 @@
 
 int mount_bdev_pre_handler(struct kprobe *kp, struct pt_regs *regs) {
     pr_debug(pr_format("mount_bdev() called\n"));
-    return -1;
+    return 0;
 }
