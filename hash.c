@@ -52,3 +52,31 @@ error:
 no_tfm_alloc:
     return ERR_PTR(err);
 }
+
+int hash2(const char *alg_name, const char *key, int key_len, char *out) {
+    int err;
+    struct crypto_shash *alg = crypto_alloc_shash(alg_name, 0, 0);
+    if (IS_ERR(alg)) {
+        err = PTR_ERR(alg);
+        goto no_tfm_alloc;
+    }
+    struct shash_desc *desc;
+    size_t desc_size = crypto_shash_descsize(alg) + sizeof(*desc);
+    desc = kzalloc(desc_size, GFP_KERNEL);
+    if (desc == NULL) {
+        err = -ENOMEM;
+        goto free_shash;
+    }
+    desc->tfm = alg;
+    size_t digest_size = crypto_shash_digestsize(alg);
+    err = crypto_shash_digest(desc, key, key_len, out);
+    if (err < 0) {
+        goto free_desc;
+    }
+free_desc:
+    kfree(desc);
+free_shash:
+    crypto_free_shash(desc->tfm);
+no_tfm_alloc:
+    return err;
+}

@@ -1,6 +1,6 @@
 #ifndef AOS_REGISTRY_H
 #define AOS_REGISTRY_H
-#include <stdbool.h>
+#include <linux/types.h>
 
 // EDUPNAME    indicates that someone has tried to register a device already registered
 // ETOOBIG     indicates that the device name given to registry_insert exceeds the maximum number
@@ -20,5 +20,7 @@ int registry_insert(const char *dev_name, const char *password);
 int registry_delete(const char *dev_name, const char *password);
 
 bool registry_check_password(const char *dev_name, const char *password);
+
+bool registry_lookup(const char *dev_name);
 
 #endif

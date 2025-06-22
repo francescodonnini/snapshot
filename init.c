@@ -1,6 +1,7 @@
 #include "include/chrdev.h"
 #include "include/find_mount.h"
 #include "include/pr_format.h"
+#include "include/probes.h"
 #include "include/registry.h"
 #include <linux/crypto.h>
 #include <linux/init.h>
@@ -10,6 +11,7 @@
 #include <linux/types.h>
 
 static int __init snapshot_init(void) {
+    probes_init();
     registry_init();
     procfs_init();
     chrdev_init();

@@ -4,7 +4,15 @@
         "mounts.h": "c",
         "sprintf.h": "c",
         "types.h": "c",
-        "chrdev.h": "c"
+        "chrdev.h": "c",
+        "kprobes.h": "c",
+        "module.h": "c",
+        "mount.h": "c",
+        "kprobe_handlers.h": "c",
+        "stdbool.h": "c",
+        "spinlock.h": "c",
+        "container_of.h": "c",
+        "pr_format.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
     "makefile.configureOnOpen": true,
