@@ -8,8 +8,10 @@
 
 struct registry_entity {
     struct list_head list;
-    char             *dev_name;
-    char             *password;
+    // speed up searches by making string comparisons only on collisions or matches
+    unsigned long    dev_name_hash; 
+    char            *dev_name;
+    char            *password;
 };
 
 DEFINE_SPINLOCK(write_lock);
@@ -27,14 +29,26 @@ int registry_init(void) {
  * registry_cleanup deallocates all the heap-allocated data structures used by this subsystem
  */
 void registry_cleanup(void) {
+    struct list_head *old_head = registry_db.next;
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
+    rcu_assign_pointer(registry_db.next, NULL);
+    spin_unlock_irqrestore(&write_lock, flags);
     synchronize_rcu();
     struct registry_entity *it, *tmp;
-    list_for_each_entry_safe(it, tmp, &registry_db, list) {
+    list_for_each_entry_safe(it, tmp, old_head, list) {
         kfree(it);
     }
-    spin_unlock_irqrestore(&write_lock, flags);
+}
+
+// non-cryptographic hash function created by Glenn Fowler, Landon Curt Noll, and Kiem-Phong Vo
+static unsigned long fast_hash(const char *name) {
+    unsigned long h = 0xcbf29ce484222325;
+    for (const char *c = name; *c; ++c) {
+        h *= 0x100000001b3;
+        h ^= *c;
+    }
+    return h;
 }
 
 static struct registry_entity* mk_node(const char *dev_name, const char *password) {
@@ -44,7 +58,7 @@ static struct registry_entity* mk_node(const char *dev_name, const char *passwor
         err = -ETOOBIG;
         goto no_node;
     }
-    size_t total_size = sizeof(struct registry_entity) + (n + 1) + SHA1_HASH_LEN;
+    size_t total_size = sizeof(struct registry_entity) + sizeof(long) + (n + 1) + SHA1_HASH_LEN;
     struct registry_entity *node = kmalloc(total_size, GFP_KERNEL);
     if (node == NULL) {
         err = -ENOMEM;
@@ -52,7 +66,8 @@ static struct registry_entity* mk_node(const char *dev_name, const char *passwor
     }
     node->list.prev = NULL;
     node->list.next = NULL;
-    node->dev_name = (char*) node + sizeof(struct registry_entity);
+    node->dev_name_hash = fast_hash(dev_name);
+    node->dev_name = (char*) node + sizeof(struct registry_entity) + sizeof(long);
     node->password = node->dev_name + (n + 1);
     err = hash2("sha1", password, strlen(password), node->password, SHA1_HASH_LEN);
     if (err) {
@@ -68,9 +83,10 @@ no_node:
 }
 
 static struct registry_entity* get_raw(const char *dev_name) {
+    unsigned long h = fast_hash(dev_name);
     struct registry_entity *it;
     list_for_each_entry(it, &registry_db, list) {
-        if (!strcmp(it->dev_name, dev_name)) {
+        if (h == it->dev_name_hash && !strcmp(it->dev_name, dev_name)) {
             return it;
         }
     }
