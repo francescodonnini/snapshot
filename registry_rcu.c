@@ -54,7 +54,7 @@ static struct registry_entity* mk_node(const char *dev_name, const char *passwor
     node->list.next = NULL;
     node->dev_name = (char*) node + sizeof(struct registry_entity);
     node->password = node->dev_name + (n + 1);
-    err = hash2("sha1", password, strlen(password), node->password);
+    err = hash2("sha1", password, strlen(password), node->password, SHA1_HASH_LEN);
     if (err) {
         goto free_node;
     }
