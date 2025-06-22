@@ -77,7 +77,7 @@ static struct registry_entity* get_raw(const char *dev_name) {
     return NULL;
 }
 
-static bool lookup_raw(const char *dev_name) {
+static inline bool lookup_raw(const char *dev_name) {
     return get_raw(dev_name) != NULL;
 }
 
@@ -107,6 +107,7 @@ int registry_insert(const char *dev_name, const char *password) {
     if (IS_ERR(ep)) {
         return PTR_ERR(ep);
     }
+    pr_debug(pr_fmt("created node: %s\n"), ep->dev_name);
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
     int err = try_add(ep);
@@ -119,9 +120,9 @@ static bool check_password(const char *pw_hash, const char *password) {
     if (IS_ERR(h)) {
         return false;
     }
-    int ir = memcmp(pw_hash, h, SHA1_HASH_LEN) == 0;
+    bool b = memcmp(pw_hash, h, SHA1_HASH_LEN) == 0;
     kfree(h);
-    return ir;
+    return b;
 }
 
 /**
