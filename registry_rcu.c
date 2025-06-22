@@ -31,7 +31,7 @@ void registry_cleanup(void) {
     spin_lock_irqsave(&write_lock, flags);
     synchronize_rcu();
     struct registry_entity *it, *tmp;
-    list_for_each_entry_safe(it, tmp, registry_db.next, list) {
+    list_for_each_entry_safe(it, tmp, &registry_db, list) {
         kfree(it);
     }
     spin_unlock_irqrestore(&write_lock, flags);
@@ -69,7 +69,7 @@ no_node:
 
 static struct registry_entity* get_raw(const char *dev_name) {
     struct registry_entity *it;
-    list_for_each_entry(it, registry_db.next, list) {
+    list_for_each_entry(it, &registry_db, list) {
         if (!strcmp(it->dev_name, dev_name)) {
             return it;
         }
@@ -112,6 +112,9 @@ int registry_insert(const char *dev_name, const char *password) {
     spin_lock_irqsave(&write_lock, flags);
     int err = try_add(ep);
     spin_unlock_irqrestore(&write_lock, flags);
+    if (err) {
+        kfree(ep);
+    }
     return err;
 }
 
@@ -165,7 +168,7 @@ bool registry_lookup(const char *dev_name) {
     struct registry_entity *it;
     bool b = false;
     rcu_read_lock();
-    list_for_each_entry_rcu(it, registry_db.next, list) {
+    list_for_each_entry_rcu(it, &registry_db, list) {
         b = !strcmp(it->dev_name, dev_name);
         if (b) {
             break;
