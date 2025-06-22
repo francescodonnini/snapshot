@@ -11,8 +11,9 @@ static struct kprobe *kprobe_table[] = {
 static size_t KPROBES_NUM = sizeof(kprobe_table) / sizeof(struct kprobe*);
 
 static struct kretprobe mount_bdev_kretp = {.kp={.symbol_name="mount_bdev"}, .entry_handler=mount_bdev_entry_handler, .handler=mount_bdev_handler};
-
+static struct kretprobe vfs_write_kretp = {.kp={.symbol_name="vfs_write"}, .entry_handler=vfs_write_entry_handler, .handler=vfs_write_handler};
 static struct kretprobe *kretprobe_table[] = {
+    &vfs_write_kretp
 };
 static size_t KRETPROBES_NUM = sizeof(kretprobe_table) / sizeof(struct kretprobe*);
 
