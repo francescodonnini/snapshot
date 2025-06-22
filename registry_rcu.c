@@ -29,7 +29,7 @@ int registry_init(void) {
  * registry_cleanup deallocates all the heap-allocated data structures used by this subsystem
  */
 void registry_cleanup(void) {
-    struct list_head old_head;
+    LIST_HEAD(old_head);
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
     list_splice_init(&registry_db, &old_head);
