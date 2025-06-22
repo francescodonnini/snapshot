@@ -11,7 +11,6 @@
 #include <linux/types.h>
 
 static int __init snapshot_init(void) {
-    probes_init();
     registry_init();
     procfs_init();
     chrdev_init();

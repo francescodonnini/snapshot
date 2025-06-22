@@ -45,4 +45,5 @@ static void unregister_all(void) {
 
 void probes_cleanup(void) {
     unregister_all();
+    pr_debug(pr_format("kprobes unregistered!"));
 }

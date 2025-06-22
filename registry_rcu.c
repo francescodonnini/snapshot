@@ -135,7 +135,7 @@ int registry_delete(const char *dev_name, const char *password) {
     spin_lock_irqsave(&write_lock, flags);
     struct registry_entity *ep = get_raw(dev_name);
     int err = -EWRONGCRED;
-    if (!ep && check_password(ep->password, password)) {
+    if (ep && check_password(ep->password, password)) {
         list_del_rcu(&ep->list);
         err = 0;
     }
