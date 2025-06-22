@@ -8,7 +8,7 @@
 #include <linux/spinlock.h>
 #include <linux/string.h>
 
-#define SHA1_HASH_LEN     20
+#define SHA1_HASH_LEN (20)
 
 struct registry_node {
     struct list_head list;
@@ -63,7 +63,7 @@ static struct registry_node* get_node(const char *dev_name) {
     return n;
 }
 
-static inline int lookup_node(const char *dev_name) {
+static inline bool lookup_node(const char *dev_name) {
     return get_node(dev_name) != NULL;
 }
 
@@ -127,10 +127,10 @@ int registry_insert(const char *dev_name, const char *password) {
     return 0;
 }
 
-static int check_password(const char *pw_hash, const char *password) {
+static bool check_password(const char *pw_hash, const char *password) {
     char *h = hash("sha1", password, strlen(password));
     if (IS_ERR(h)) {
-        return 0;
+        return false;
     }
     int ir = memcmp(pw_hash, h, SHA1_HASH_LEN) == 0;
     kfree(h);
@@ -167,9 +167,9 @@ int registry_delete(const char *dev_name, const char *password) {
  * been registered with the password password
  * @param dev_name the name of the block-device
  * @param password the password protecting the snapshot
- * @return 0 if the passwords does not match or a snapshot with dev_name does not exist, 1 otherwise.
+ * @return false if the passwords does not match or a snapshot with dev_name does not exist, true otherwise.
  */
-int registry_check_password(const char *dev_name, const char *password) {
+bool registry_check_password(const char *dev_name, const char *password) {
     struct registry_node *rp = get_node(dev_name);
     return rp != NULL && check_password(rp->password, password);
 }
