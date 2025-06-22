@@ -6,6 +6,7 @@
 #include <linux/module.h>
 
 static void __exit snapshot_exit(void) {
+    probes_cleanup();
     chrdev_cleanup();
     registry_cleanup();
     procfs_cleanup();

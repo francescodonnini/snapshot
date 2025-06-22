@@ -23,6 +23,7 @@ CFLAGS_init.o += -DDEBUG
 CFLAGS_registry_rcu.o += -DDEBUG
 CFLAGS_find_mount.o += -DDEBUG
 CFLAGS_probes.o += -DDEBUG
+CFLAGS_mount_bdev_ph.o += -DDEBUG
 
 all: 
 		make -C /lib/modules/$(shell uname -r)/build M=$(PWD)  modules 

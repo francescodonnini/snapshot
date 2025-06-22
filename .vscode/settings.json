@@ -14,7 +14,12 @@
         "container_of.h": "c",
         "pr_format.h": "c",
         "hash.h": "c",
-        "errname.h": "c"
+        "errname.h": "c",
+        "blk_types.h": "c",
+        "kretprobe_handlers.h": "c",
+        "list.h": "c",
+        "probes.h": "c",
+        "dcache.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
     "makefile.configureOnOpen": true,
