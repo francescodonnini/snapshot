@@ -29,14 +29,16 @@ int registry_init(void) {
  * registry_cleanup deallocates all the heap-allocated data structures used by this subsystem
  */
 void registry_cleanup(void) {
-    struct list_head *old_head = registry_db.next;
+    struct list_head old_head;
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
-    rcu_assign_pointer(registry_db.next, NULL);
+    old_head.prev = rcu_dereference(&registry_db.prev);
+    old_head.next = rcu_dereference(&registry_db.next);
+    INIT_LIST_HEAD_RCU(registry_db);
     spin_unlock_irqrestore(&write_lock, flags);
     synchronize_rcu();
     struct registry_entity *it, *tmp;
-    list_for_each_entry_safe(it, tmp, old_head, list) {
+    list_for_each_entry_safe(it, tmp, &old_head, list) {
         kfree(it);
     }
 }
