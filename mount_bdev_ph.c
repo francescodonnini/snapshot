@@ -44,10 +44,5 @@ static struct dentry *get_rval(struct pt_regs *regs) {
 }
 
 int mount_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
-    struct dentry *d = get_rval(regs);
-    if (IS_ERR(d))
-        pr_debug(pr_format("mount_bdev() failed because of error %d\n"), PTR_ERR(d));
-    else
-        pr_debug(pr_format("mounted device at position: %s\n"), d->d_name.name);
     return 0;
 }
