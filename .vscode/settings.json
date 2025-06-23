@@ -19,7 +19,8 @@
         "kretprobe_handlers.h": "c",
         "list.h": "c",
         "probes.h": "c",
-        "dcache.h": "c"
+        "dcache.h": "c",
+        "string.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
     "makefile.configureOnOpen": true,

@@ -5,6 +5,7 @@
 #include <linux/dcache.h>
 #include <linux/fs.h>
 #include <linux/mount.h>
+#include <linux/string.h>
 
 static inline struct file* get_file_pointer(struct pt_regs *regs) {
 // x86_64 cc: rdi, rsi, rdx, rcx, r8, r9, stack
@@ -18,16 +19,26 @@ static inline struct file* get_file_pointer(struct pt_regs *regs) {
 #endif
 }
 
+static char *get_mountpoint(struct file *file, char *buf, int buflen) {
+    struct vfsmount *mnt = file->f_path.mnt;
+    struct path mnt_path = {
+        .mnt = mnt,
+        .dentry = mnt->mnt_root,
+    };
+    return d_path(&mnt_path, buf, buflen);
+}
+
+static inline void log_if_match(const char *m_path) {
+    if (registry_lookup(m_path)) {
+        pr_debug(pr_format("vsf_write called on %s\n"), m_path);
+    }
+} 
+
 int vfs_write_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     struct file *fp = get_file_pointer(regs);
-    fp->f_path.dentry->d_name.name
-    dentry_path()
-    struct vfsmount *mnt = fp->f_path.mnt;
-    if (registry_lookup(mnt->mnt_root->d_name.name)) {
-        struct super_block *sb = mnt->mnt_sb;
-        pr_debug(pr_format("vfs_write called on fs %s (%s)\n"), sb->s_type->name, sb->s_root->d_name.name);
-        pr_debug(pr_format("vfs_write called on device %s\n"), mnt->mnt_root->d_name.name);
-    }
+    char buffer[256];
+    char *m_path = get_mountpoint(fp, buffer, 256);
+    log_at_most(m_path);
     return 0;
 }
 
