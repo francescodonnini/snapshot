@@ -28,17 +28,20 @@ static char *get_mountpoint(struct file *file, char *buf, int buflen) {
     return d_path(&mnt_path, buf, buflen);
 }
 
-static inline void log_if_match(const char *m_path) {
-    if (registry_lookup(m_path)) {
-        pr_debug(pr_format("vsf_write called on %s\n"), m_path);
+static inline void log_if_match(struct file *fp, const char *s) {
+    char buf[256];
+    char *mntpoint = get_mountpoint(fp, buf, 256);
+    struct vfsmount *mnt = fp->f_path.mnt;
+    struct super_block *sb = mnt->mnt_sb;
+    const char *m_path = fp->f_path.dentry->d_name.name;
+    if (strstr(m_path, s)) {
+        pr_debug(pr_format("vsf_write called on (%s:%s) %s\n"), sb->s_type->name, mntpoint, m_path);
     }
 } 
 
 int vfs_write_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     struct file *fp = get_file_pointer(regs);
-    char buffer[256];
-    char *m_path = get_mountpoint(fp, buffer, 256);
-    log_at_most(m_path);
+    log_if_match(fp, "the-file");
     return 0;
 }
 
