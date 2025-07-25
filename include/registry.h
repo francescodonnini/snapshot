@@ -23,4 +23,8 @@ bool registry_check_password(const char *dev_name, const char *password);
 
 bool registry_lookup(const char *dev_name);
 
+bool registry_lookup_mm(dev_t dev);
+
+int registry_update(const char *dev_name, dev_t dev);
+
 #endif

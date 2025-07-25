@@ -19,6 +19,7 @@ ccflags-y += -I$(src)/include
 CFLAGS_kretprobes/init.o += -DDEBUG
 CFLAGS_kretprobes/mount_bdev.o += -DDEBUG
 CFLAGS_kretprobes/submit_bio.o += -DDEBUG
+CFLAGS_api/registry_rcu.o += -DDEBUG
 
 all: 
 		make -C /lib/modules/$(shell uname -r)/build M=$(PWD)  modules 

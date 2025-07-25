@@ -1,9 +1,11 @@
 #include "registry.h"
 #include "hash.h"
+#include <linux/kdev_t.h>
 #include <linux/list.h>
 #include <linux/rculist.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
+#include <linux/types.h>
 #define SHA1_HASH_LEN (20)
 
 struct registry_entity {
@@ -12,6 +14,7 @@ struct registry_entity {
     unsigned long    dev_name_hash; 
     char            *dev_name;
     char            *password;
+    dev_t           dev;
 };
 
 DEFINE_SPINLOCK(write_lock);
@@ -180,16 +183,52 @@ bool registry_check_password(const char *dev_name, const char *password) {
     return b;
 }
 
-bool registry_lookup(const char *dev_name) {
+static bool registry_lookup_aux(bool(*pred)(struct registry_entity*, void *args), void *args) {
     struct registry_entity *it;
     bool b = false;
     rcu_read_lock();
     list_for_each_entry_rcu(it, &registry_db, list) {
-        b = !strcmp(it->dev_name, dev_name);
+        b = pred(it, args);
         if (b) {
             break;
         }
     }
     rcu_read_unlock();
     return b;
+}
+
+static bool by_dev_name(struct registry_entity *it, void *args) {
+    const char *dev_name = (const char*)args;
+    return it->dev_name_hash == fast_hash(dev_name) && 
+           !strcmp(it->dev_name, dev_name);
+}
+
+bool registry_lookup(const char *dev_name) {
+    return registry_lookup_aux(by_dev_name, (void*)dev_name);
+}
+
+static bool by_mm(struct registry_entity *it, void *args) {
+    dev_t *dev = (dev_t*)args;
+    return it->dev == *dev;
+}
+
+bool registry_lookup_mm(dev_t dev) {
+    return registry_lookup_aux(by_mm, (void*)&dev);
+}
+
+int registry_update(const char *dev_name, dev_t dev) {
+    unsigned long flags;
+    spin_lock_irqsave(&write_lock, flags);
+    struct registry_entity *ep = get_raw(dev_name);
+    int err = 0;
+    if (!ep) {
+        err = -1;
+        goto RELEASE_LOCK;
+    }
+    ep->dev = dev;
+    pr_debug(pr_fmt("updated node: %s, major: %d, minor: %d\n"), 
+             ep->dev_name, MAJOR(ep->dev), MINOR(ep->dev));
+RELEASE_LOCK:
+    spin_unlock_irqrestore(&write_lock, flags);
+    return err;
 }

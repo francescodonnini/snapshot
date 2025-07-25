@@ -40,5 +40,6 @@ int mount_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     struct mount_bdev_data *data = (struct mount_bdev_data*)kp->data;
     pr_debug(pr_format("mounted block device (%d, %d) with bdev %s\n"),
              MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev), data->dev_name);
+    registry_update(data->dev_name, bdev->bd_dev);
     return 0;
 }
