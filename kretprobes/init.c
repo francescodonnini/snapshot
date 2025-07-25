@@ -6,7 +6,22 @@
 #include <linux/kprobes.h>
 #include <linux/list.h>
 
+static struct kretprobe submit_bio_kretprobe = {
+    .kp.symbol_name = "submit_bio",
+    .handler = submit_bio_handler,
+    .entry_handler = submit_bio_entry_handler
+};
+
+static struct kretprobe mount_bdev_kretprobe = {
+    .kp.symbol_name = "mount_bdev",
+    .handler = mount_bdev_handler,
+    .entry_handler = mount_bdev_entry_handler,
+    .data_size = sizeof(struct mount_bdev_data)
+};
+
 static struct kretprobe *kretprobe_table[] = {
+    // &submit_bio_kretprobe,
+    &mount_bdev_kretprobe
 };
 static size_t KRETPROBES_NUM = sizeof(kretprobe_table) / sizeof(struct kretprobe *);
 

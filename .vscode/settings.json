@@ -21,7 +21,13 @@
         "probes.h": "c",
         "dcache.h": "c",
         "string.h": "c",
-        "find_mount.h": "c"
+        "find_mount.h": "c",
+        "bio.h": "c",
+        "pr.h": "c",
+        "printk.h": "c",
+        "stdarg.h": "c",
+        "fs.h": "c",
+        "registry.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
     "makefile.configureOnOpen": true,

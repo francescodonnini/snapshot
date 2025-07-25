@@ -74,6 +74,10 @@ static inline long __get_rval(struct pt_regs *regs) {
 
 #define get_rval(_type, _regs) ((_type)__get_rval(_regs))
 
+struct mount_bdev_data {
+    char *dev_name;
+};
+
 int mount_bdev_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 
 int mount_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
