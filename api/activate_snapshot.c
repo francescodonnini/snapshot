@@ -1,7 +1,7 @@
-#include "include/api.h"
-#include "include/find_mount.h"
-#include "include/pr_format.h"
-#include "include/registry.h"
+#include "api.h"
+#include "find_mount.h"
+#include "pr_format.h"
+#include "registry.h"
 #include <linux/printk.h>
 
 int activate_snapshot(const char *dev_name, const char *password) {

@@ -1,6 +1,6 @@
-#include "include/chrdev_ioctl.h"
-#include "include/chrdev.h"
-#include "include/pr_format.h"
+#include "chrdev_ioctl.h"
+#include "chrdev.h"
+#include "pr_format.h"
 #include <linux/cdev.h>
 #include <linux/device/class.h>
 #include <linux/init.h>

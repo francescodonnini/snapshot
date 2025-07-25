@@ -1,29 +1,24 @@
 obj-m += snapshot.o
-snapshot-objs := 	activate_snapshot.o \
-					chrdev_ioctl.o \
-					chrdev.o \
-					deactivate_snapshot.o \
+snapshot-objs := 	api/activate_snapshot.o \
+					api/deactivate_snapshot.o \
+					api/find_mount.o \
+					api/hash.o \
+					api/registry_rcu.o \
+					ioctl/chrdev_ioctl.o \
+					ioctl/chrdev.o \
+					kretprobes/init.o \
+					kretprobes/mount_bdev.o \
+					kretprobes/submit_bio.o \
 					exit.o \
-					hash.o \
 					init.o \
-					registry_rcu.o \
-					find_mount.o \
-					vfs_write_ph.o \
-					mount_bdev_ph.o \
-					probes.o
 
 PWD := $(CURDIR) 
 
-CFLAGS_activate_snapshot.o += -DDEBUG
-CFLAGS_chrdev.o += -DDEBUG
-CFLAGS_chrdev_ioctl.o += -DDEBUG
-CFLAGS_deactivate_snapshot.o += -DDEBUG
-CFLAGS_hash.o += -DDEBUG
-CFLAGS_init.o += -DDEBUG
-CFLAGS_registry_rcu.o += -DDEBUG
-CFLAGS_find_mount.o += -DDEBUG
-CFLAGS_probes.o += -DDEBUG
-CFLAGS_vfs_write_ph.o += -DDEBUG
+ccflags-y += -I$(src)/include
+
+CFLAGS_kretprobes/init.o += -DDEBUG
+CFLAGS_kretprobes/mount_bdev.o += -DDEBUG
+CFLAGS_kretprobes/submit_bio.o += -DDEBUG
 
 all: 
 		make -C /lib/modules/$(shell uname -r)/build M=$(PWD)  modules 

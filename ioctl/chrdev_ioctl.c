@@ -1,6 +1,6 @@
-#include "include/chrdev_ioctl.h"
-#include "include/api.h"
-#include "include/pr_format.h"
+#include "chrdev_ioctl.h"
+#include "api.h"
+#include "pr_format.h"
 #include <asm/errno.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>

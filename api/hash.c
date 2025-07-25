@@ -1,5 +1,5 @@
-#include "include/hash.h"
-#include "include/pr_format.h"
+#include "hash.h"
+#include "pr_format.h"
 #include <linux/errname.h>
 #include <crypto/hash.h>
 #include <linux/printk.h>

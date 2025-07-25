@@ -1,5 +1,5 @@
-#include "include/find_mount.h"
-#include "include/pr_format.h"
+#include "find_mount.h"
+#include "pr_format.h"
 #include <linux/fs.h>
 #include <linux/kstrtox.h>
 #include <linux/printk.h>

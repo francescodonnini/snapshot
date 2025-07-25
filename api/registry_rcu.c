@@ -1,5 +1,5 @@
-#include "include/registry.h"
-#include "include/hash.h"
+#include "registry.h"
+#include "hash.h"
 #include <linux/list.h>
 #include <linux/rculist.h>
 #include <linux/slab.h>

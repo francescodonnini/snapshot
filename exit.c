@@ -1,7 +1,7 @@
-#include "include/chrdev.h"
-#include "include/find_mount.h"
-#include "include/probes.h"
-#include "include/registry.h"
+#include "chrdev.h"
+#include "find_mount.h"
+#include "probes.h"
+#include "registry.h"
 #include <linux/init.h>
 #include <linux/module.h>
 

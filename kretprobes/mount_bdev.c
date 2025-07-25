@@ -1,5 +1,5 @@
-#include "include/kretprobe_handlers.h"
-#include "include/pr_format.h"
+#include "kretprobe_handlers.h"
+#include "pr_format.h"
 #include <linux/dcache.h>
 #include <linux/fs.h>
 
@@ -31,16 +31,6 @@ int mount_bdev_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
     struct file_system_type *fs_type = get_filesystem_type(regs);
     pr_debug(pr_format("mount_bdev(%s, %s) called\n"), fs_type->name, get_dev_name(regs));
     return 0;
-}
-
-static struct dentry *get_rval(struct pt_regs *regs) {
-#ifdef CONFIG_X86_64
-    return (struct dentry*) regs->ax;
-#elif CONFIG_X86
-    return (struct dentry*) regs->ax;
-#else
-#error "unsupported architecture"
-#endif
 }
 
 int mount_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
