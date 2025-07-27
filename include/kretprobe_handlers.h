@@ -78,13 +78,13 @@ struct mount_bdev_data {
     char *dev_name;
 };
 
-struct submit_bio_data {
-    dev_t dev;
-};
-
 int mount_bdev_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 
 int mount_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
+
+struct submit_bio_data {
+    dev_t dev;
+};
 
 int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 

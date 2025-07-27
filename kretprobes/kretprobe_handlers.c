@@ -1,6 +1,6 @@
+#include "kretprobe_handlers.h"
 #include "pr_format.h"
 #include "probes.h"
-#include "kretprobe_handlers.h"
 #include <linux/dcache.h>
 #include <linux/fs.h>
 #include <linux/kprobes.h>
@@ -9,7 +9,8 @@
 static struct kretprobe submit_bio_kretprobe = {
     .kp.symbol_name = "submit_bio",
     .handler = submit_bio_handler,
-    .entry_handler = submit_bio_entry_handler
+    .entry_handler = submit_bio_entry_handler,
+    .data_size = sizeof(struct submit_bio_data),
 };
 
 static struct kretprobe mount_bdev_kretprobe = {
