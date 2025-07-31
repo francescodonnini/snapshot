@@ -8,9 +8,7 @@
 
 static struct kretprobe submit_bio_kretprobe = {
     .kp.symbol_name = "submit_bio",
-    .handler = submit_bio_handler,
-    .entry_handler = submit_bio_entry_handler,
-    .data_size = sizeof(struct submit_bio_data),
+    .entry_handler = submit_bio_entry_handler
 };
 
 static struct kretprobe mount_bdev_kretprobe = {
@@ -47,5 +45,4 @@ int probes_init(void) {
 
 void probes_cleanup(void) {
     unregister_kretprobes(kretprobe_table, KRETPROBES_NUM);
-    pr_debug(pr_format("kprobes unregistered!"));
 }

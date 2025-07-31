@@ -10,6 +10,14 @@ static inline long __get_arg1(struct pt_regs *regs) {
 #endif
 }
 
+static inline void set_arg1(struct pt_regs *regs, unsigned long arg1) {
+#ifdef CONFIG_X86_64
+    regs->di = arg1;
+#else
+#error "unsupported architecture"
+#endif
+} 
+
 static inline long __get_arg2(struct pt_regs *regs) {
 #ifdef CONFIG_X86_64
     return regs->si;
@@ -87,7 +95,5 @@ struct submit_bio_data {
 };
 
 int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
-
-int submit_bio_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 
 #endif

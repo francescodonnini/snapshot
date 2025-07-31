@@ -1,9 +1,9 @@
+#include "bdget.h"
 #include "blkdev.h"
 #include "pr_format.h"
 #include <linux/blkdev.h>
 #include <linux/blk-mq.h>
 #include <linux/fs.h>
-#include <linux/genhd.h>
 #include <linux/printk.h>
 #include <linux/sprintf.h>
 
@@ -11,6 +11,7 @@
 
 static struct dsnapshots_dev {
     int                    major;
+    struct block_device   *bdev;
     struct gendisk        *gd;
     struct blk_mq_tag_set  tag_set;
     struct request_queue  *queue;
@@ -27,7 +28,7 @@ static blk_status_t process_blk_request(struct blk_mq_hw_ctx *hctx,
         blk_mq_end_request(rq, BLK_STS_IOERR);
         return BLK_STS_OK;
     }
-
+    pr_debug(pr_format("processing request %p for device '(%d, 0)'\n"), rq, dev->major);
     blk_mq_end_request(rq, BLK_STS_OK);
     return BLK_STS_OK;
 }
@@ -36,89 +37,111 @@ static struct blk_mq_ops qops = {
     .queue_rq = process_blk_request,
 };
 
-static int submit_bio_stack(struct bio *bio) {
-    return 0;
-}
-
-static struct block_device_operations *bops = {
-    .module = THIS_MODULE,
-    .submit_bio = submit_bio_stack
+static const struct block_device_operations bops = {
+    .owner = THIS_MODULE,
 };
 
-static int mq_tag_set_create(struct blk_mq_tag_set *set) {
-    set->ops = &qops;
-    set->nr_hw_queues = 1;
-    set->queue_depth = 128;
-    set->cmd_size = sizeof(struct request);
-    set->flags = BLK_MQ_F_SHOULD_MERGE;
-    int err = blk_mq_alloc_tag_set(set);
-    if (err) {
-        pr_debug(pr_format("failed to allocate tag set for '%s': %d\n", DEV_NAME, err));
-        return err;
-    }
-    return 0;
+static void tag_set_init(struct blk_mq_tag_set *tag_set, struct dsnapshots_dev *dev) {
+    memset(&dev->tag_set, 0, sizeof(dev->tag_set));
+    dev->tag_set.ops = &qops;
+    dev->tag_set.nr_hw_queues = 1;
+    dev->tag_set.queue_depth = 128;
+    dev->tag_set.numa_node = NUMA_NO_NODE;
+    dev->tag_set.cmd_size = 0;
+    dev->tag_set.driver_data = dev;
 }
 
-static int mq_init_queue(struct dsnapshots_dev *dev) {
-    int err = mq_tag_set_create(&dev->tag_set);
-    if (err) {
-        return err;
-    }
-    // creates both hardware and software queues
-    struct request_queue *queue = blk_mq_init_queue(dev->tag_set);
-    if (IS_ERR(queue)) {
-        pr_debug(pr_format("failed to initialize request queue for '%s'\n", DEV_NAME));
-        blk_mq_free_tag_set(dev->tag_set);
-        return PTR_ERR(queue);
-    }
-    // private date for the queue
-    queue->queuedata = dev;
-    dev->queue = queue;
-    return 0;
-}
-
+/**
+ * gendisk_create - creates a disk and adds it to the system.
+ */
 static int gendisk_create(struct dsnapshots_dev *dev) {
-    int err = mq_init_queue(dev);
+    int nr_minors = 1;
+    tag_set_init(&dev->tag_set, dev);
+    int err = blk_mq_alloc_tag_set(&dev->tag_set);
     if (err) {
+        pr_debug(pr_format("cannot allocate tag set for '%s'\n"), DEV_NAME);
         return err;
     }
-    struct gendisk *gd = blk_alloc_disk(1);
+
+    struct gendisk *gd = blk_mq_alloc_disk(&dev->tag_set, NULL, NULL);
     if (IS_ERR(gd)) {
-        pr_debug(pr_format("failed to allocate gendisk for '%s'\n", DEV_NAME));
-        return PTR_ERR(gd);
+        err = PTR_ERR(gd);
+        pr_debug(pr_format("failed to allocate gendisk for '%s', got error %d\n"), DEV_NAME, err);
+        goto free_tag_set;
     }
-    gd->major = major;
+    snprintf(gd->disk_name, 32, "%sa", DEV_NAME);
+    gd->major = dev->major;
     gd->first_minor = 0;
+    gd->minors = nr_minors;
     gd->fops = &bops;
     gd->private_data = dev;
-    snprintf(gd->disk_name, 32, "%sa", DEV_NAME);
+    dev->queue = gd->queue;
+    // set_capacity(gd, (1024 * 1024 * 1024) / 512);
     dev->gd = gd;
-    add_disk(dev->gd);
+    err = add_disk(dev->gd);
+    if (err) {
+        pr_debug(pr_format("failed to add gendisk for '%s', got error %d\n"), DEV_NAME, err);
+        goto add_disk_failed;
+    }
     return 0;
+
+add_disk_failed:
+    put_disk(dev->gd);
+free_tag_set:
+    blk_mq_free_tag_set(&dev->tag_set);
+    return err;
+}
+
+static void gendisk_delete(struct dsnapshots_dev *dev) {
+    if (dev->gd) {
+        del_gendisk(dev->gd);
+        put_disk(dev->gd);
+    }
+    blk_mq_free_tag_set(&dev->tag_set);
+}
+
+static struct block_device* bdev_get_by_dev(dev_t dev) {
+    blk_mode_t mode = BLK_OPEN_WRITE;
+    struct file *fp = bdev_file_open_by_dev(dev, mode, NULL, NULL);
+    if (IS_ERR(fp)) {
+        pr_debug(pr_format("failed to open block device '%s'\n"), DEV_NAME);
+        return ERR_CAST(fp);
+    }
+    return file_bdev(fp);
 }
 
 int blkdev_init(void) {
     int major = register_blkdev(0, DEV_NAME);
     if (major < 0) {
-        pr_debug(pr_format("failed to register block device '%s': %d\n", DEV_NAME, major));
+        pr_debug(pr_format("failed to register block device '%s': %d\n"), DEV_NAME, major);
         return major;
     }
+    dev.major = major;
     int err = gendisk_create(&dev);
     if (err) {
-        unregister_blkdev(major, DEV_NAME);
-        return err;
+        goto unregister_bdev;
     }
-    dev->major = major;
+    struct block_device *bdev = bdev_get_by_dev(MKDEV(major, 0));
+    if (IS_ERR(bdev) || !bdev) {
+        err = PTR_ERR(bdev);
+        pr_debug(pr_format("failed to get block device '%s', got error %d\n"), DEV_NAME, err);
+        goto delete_disk;
+    }
+    dev.bdev = bdev;
     return 0;
+
+delete_disk:
+    gendisk_delete(&dev);
+unregister_bdev:
+    unregister_blkdev(major, DEV_NAME);
+    return err;
 }
 
-static void blkdev_delete(struct dsnapshots_dev *dev) {
-    if (dev->gd) {
-        del_gendisk(dev->gd);
-    }
+struct block_device* bdget(void) {
+    return dev.bdev;
 }
 
 void blkdev_cleanup(void) {
-    blkdev_delete(&dev);
-    unregister_blkdev(0, DEV_NAME);
+    gendisk_delete(&dev);
+    unregister_blkdev(dev.major, DEV_NAME);
 }

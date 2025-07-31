@@ -1,3 +1,4 @@
+#include "bio.h"
 #include "chrdev.h"
 #include "find_mount.h"
 #include "probes.h"
@@ -10,6 +11,7 @@ static void __exit snapshot_exit(void) {
     chrdev_cleanup();
     registry_cleanup();
     procfs_cleanup();
+    bio_deferred_work_cleanup();
 }
 
 module_exit(snapshot_exit);

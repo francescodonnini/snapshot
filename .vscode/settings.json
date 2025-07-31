@@ -27,7 +27,16 @@
         "printk.h": "c",
         "stdarg.h": "c",
         "fs.h": "c",
-        "registry.h": "c"
+        "registry.h": "c",
+        "blk-mq.h": "c",
+        "registry_lookup.h": "c",
+        "bdget.h": "c",
+        "blkdev.h": "c",
+        "workqueue_types.h": "c",
+        "bioset.h": "c",
+        "percpu-defs.h": "c",
+        "init.h": "c",
+        "slab.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
     "makefile.configureOnOpen": true,
