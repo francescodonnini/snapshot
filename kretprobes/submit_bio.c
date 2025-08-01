@@ -8,7 +8,8 @@
 #define BIO_BITMASK (0x8000)
 
 static void dummy_end_io(struct bio *bio) {
-    pr_debug(pr_format("dummy_end_io called on device (%d, %d)\n"), MAJOR(bio->bi_bdev->bd_dev), MINOR(bio->bi_bdev->bd_dev));
+    dbg_dump_bio("dummy_end_io called on\n", bio);
+    bio_put(bio);
 }
 
 static inline void bio_mark(struct bio *bio) {

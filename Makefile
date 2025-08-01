@@ -5,6 +5,7 @@ snapshot-objs := 	api/activate_snapshot.o \
 					api/hash.o \
 					api/registry_rcu.o \
 					bio/bio_enqueue.o \
+					bio/dbg_dump_bio.o \
 					ioctl/chrdev_ioctl.o \
 					ioctl/chrdev.o \
 					kretprobes/kretprobe_handlers.o \
@@ -17,8 +18,10 @@ PWD := $(CURDIR)
 
 ccflags-y += -I$(src)/include
 
+CFLAGS_api/registry_rcu.o += -DDEBUG
 CFLAGS_bio/bio_enqueue.o += -DDEBUG
 CFLAGS_kretprobes/submit_bio.o += -DDEBUG
+CFLAGS_bio/dbg_dump_bio.o += -DDEBUG
 
 all: 
 		make -C /lib/modules/$(shell uname -r)/build M=$(PWD)  modules 
@@ -35,11 +38,7 @@ clean:
 test_start:
 		insmod snapshot.ko
 		sh test/activate.sh /dev/loop0 1234
-		make /home/soa/Documents/singlefile-FS/ load-FS-driver
-		make /home/soa/Documents/singlefile-FS/ mount-fs
 
 test_end:
 		sh test/deactivate.sh /dev/loop0 1234
 		rmmod snapshot
-		umount /dev/loop0
-		rmmod singlefile-FS

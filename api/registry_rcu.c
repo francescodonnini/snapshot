@@ -1,7 +1,9 @@
 #include "registry.h"
 #include "hash.h"
-#include <linux/kdev_t.h>
+#include "pr_format.h"
+#include <linux/blkdev.h>
 #include <linux/list.h>
+#include <linux/printk.h>
 #include <linux/rculist.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
@@ -114,6 +116,21 @@ static int try_add(struct registry_entity *ep) {
     return 0;
 }
 
+static int try_get_dev(const char *dev_name, dev_t *dev) {
+    struct file *fp = bdev_file_open_by_path(dev_name, BLK_OPEN_READ, NULL, NULL);
+    if (IS_ERR(fp)) {
+        pr_debug(pr_format("failed to open block device '%s', got error %ld\n"), dev_name, PTR_ERR(fp));
+        return PTR_ERR(fp);
+    }
+    *dev = file_bdev(fp)->bd_dev;
+    pr_debug(
+        pr_format("device number for '%s' is (%d, %d)"),
+        dev_name,
+        MAJOR(*dev), MINOR(*dev));
+    filp_close(fp, NULL);
+    return 0;
+}
+
 /**
  * registry_check_password checks if a block-device identified by dev_name has
  * been registered with the password password
@@ -126,10 +143,15 @@ int registry_insert(const char *dev_name, const char *password) {
     if (IS_ERR(ep)) {
         return PTR_ERR(ep);
     }
+    dev_t dev;
+    int err = try_get_dev(dev_name, &dev);
+    if (!err) {
+        ep->dev = dev;
+    }
     pr_debug(pr_fmt("created node: %s\n"), ep->dev_name);
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
-    int err = try_add(ep);
+    err = try_add(ep);
     spin_unlock_irqrestore(&write_lock, flags);
     if (err) {
         kfree(ep);

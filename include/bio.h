@@ -9,4 +9,6 @@ void bio_deferred_work_cleanup(void);
 
 bool bio_enqueue(struct bio *bio);
 
+void dbg_dump_bio(const char *prefix, struct bio *bio);
+
 #endif
