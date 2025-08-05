@@ -3,4 +3,9 @@ if [ "$#" -ne 2 ]; then
     exit -1
 fi
 PARENT=$(dirname "$0")
-./$PARENT/cli.o activate --path $1 --password $2
+if [ "$PARENT" == "." ]; then
+    EXE="./cli/cli.o"
+else
+    EXE="./$PARENT/cli/cli.o"
+fi
+"$EXE" activate --path $1 --password $2
