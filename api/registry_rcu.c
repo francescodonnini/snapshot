@@ -1,5 +1,4 @@
 #include "registry.h"
-#include "bdget.h"
 #include "fast_hash.h"
 #include "hash.h"
 #include "pr_format.h"
@@ -167,17 +166,9 @@ int registry_insert(const char *dev_name, const char *password) {
     if (IS_ERR(ep)) {
         return PTR_ERR(ep);
     }
-    dev_t dev;
-    int err = bdev_from_file(dev_name, &dev);
-    if (!err) {
-        err = update_dev(ep, dev);
-        if (err) {
-            goto out;
-        }
-    }
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
-    err = try_add(ep);
+    int err = try_add(ep);
     spin_unlock_irqrestore(&write_lock, flags);
 out:
     if (err) {

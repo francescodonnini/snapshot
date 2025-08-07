@@ -1,6 +1,6 @@
 #include "find_mount.h"
-#include "bdget.h"
 #include "pr_format.h"
+#include <linux/blkdev.h>
 #include <linux/fs.h>
 #include <linux/kstrtox.h>
 #include <linux/printk.h>
@@ -275,6 +275,23 @@ static bool by_dev_name(struct mnts_info *mip, const char *arg) {
 static bool by_mountpoint(struct mnts_info *mip, const char *arg) {
     char *path = (char*)arg;
     return !strcmp(mip->mnt_point, path);
+}
+
+/**
+ * bdev_from_file returns the device number of a block device associated to a device file in @param path.
+ * @param path (input) the path of the device file - e.g. /dev/sda1
+ * @param dev (output) device number associated to device file in @param path
+ * @return 0 on success, < 0 otherwise
+ */
+static int bdev_from_file(const char *path, dev_t *dev) {
+    struct file *fp = bdev_file_open_by_path(path, BLK_OPEN_READ, NULL, NULL);
+    if (IS_ERR(fp)) {
+        pr_debug(pr_format("failed to open block device '%s', got error %ld\n"), path, PTR_ERR(fp));
+        return PTR_ERR(fp);
+    }
+    *dev = file_bdev(fp)->bd_dev;
+    filp_close(fp, NULL);
+    return 0;
 }
 
 int get_fdev(const char *mountpoint, dev_t *dev) {

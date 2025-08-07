@@ -1,6 +1,5 @@
 obj-m += snapshot.o
 snapshot-objs := 	api/activate_snapshot.o \
-					api/bdget.o \
 					api/deactivate_snapshot.o \
 					api/find_mount.o \
 					api/hash.o \
