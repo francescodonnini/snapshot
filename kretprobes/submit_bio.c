@@ -7,6 +7,8 @@
 #include <linux/bio.h>
 #include <linux/types.h>
 
+// The last bit of the bitmap struct bio::bi_flags is not currently used
+// by the bio layer so we can use it freely
 #define BIO_BITMASK (0x8000)
 
 static void dummy_end_io(struct bio *bio) {
@@ -22,7 +24,13 @@ static inline void bio_unmark(struct bio *bio) {
     bio->bi_flags &= ~BIO_BITMASK;
 }
 
+/**
+ * skip_bio returns true if the bio has been already intercepted (and scheduled for further processing)
+ * by the kretprobe, false otherwise. When skip_bio detects that the bio request has been alread seen by the
+ * kretprobe it resets the flag (and returns true).
+ */
 static bool skip_bio(struct bio *bio) {
+    // b is true if the bio was previously marked (intercepted by the kretprobe)
     bool b = bio->bi_flags & BIO_BITMASK;
     if (b) {
         bio_unmark(bio);
@@ -52,6 +60,22 @@ static inline sector_t bio_sector(struct bio *bio) {
     return bio->bi_iter.bi_sector;
 }
 
+/**
+ * This entry handler do the following steps:
+ * 1. Checks if the bio should be intercepted. A bio request should be intercepted if it's
+ *    a write operation, it's associated to a device previously registered by the user, it hasn't
+ *    been already intercepted and it is directed to a region of the device not already hit by another
+ *    write request.
+ * 2. If a bio request should be intercepted, we cannot submit it to the bio layer because we need to copy the original
+ *    content of the region hit by the request before applying the write. We replace the bio pointer in the stack area
+ *    (the area where struct pt_regs points to) with another bio request that is directed to the bnull block device
+ *    (see the 'bnull' directory for more details). The request is called dummy because it does pratically nothing: it is
+ *    an empty read requests that is discarded by the device anyway.
+ * 3. The original bio request is submitted to workqueue by bio_enqueue for further processing.
+ * 4. The write request should be eventually submitted to the bio layer so this kretprobe will intercept the bio request twice,
+ *    and even the second time the latter is eligible to be intercepted so we need to keep track of the requests already intercepted.
+ *    One way to do this is to set to 1 a flag of the bio structure that is currently (Linux 6.15) not used by the bio layer.
+ */
 int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     struct bio *bio = get_arg1(struct bio*, regs);
     // skip the return handler if at least one of the following conditions apply:
@@ -73,8 +97,8 @@ int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
         pr_debug(pr_format("cannot enqueue bio for device (%d, %d)\n"), MAJOR(bio_devnum(bio)), MINOR(bio_devnum(bio)));
         return 1;
     }
+    // if we made this far, it means that the kretprobe handler hasn't already seen the bio request
     bio_mark(bio);
-    pr_debug(pr_format("submit_bio called on device (%d, %d)\n"), MAJOR(bio_devnum(bio)), MINOR(bio_devnum(bio)));
     set_arg1(regs, (unsigned long)dummy_bio);
     return 0;
 }
