@@ -53,7 +53,9 @@
         "path_utils.h": "c",
         "snapshot.h": "c",
         "capability.h": "c",
-        "path.h": "c"
+        "path.h": "c",
+        "delay.h": "c",
+        "stddef.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
     "makefile.configureOnOpen": true,

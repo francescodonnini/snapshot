@@ -1,5 +1,4 @@
 #include "snapshot.h"
-#include "bio.h"
 #include "fast_hash.h"
 #include "path_utils.h"
 #include "pr_format.h"
@@ -118,54 +117,43 @@ int snapshot_create(dev_t dev, const char *snapshot) {
     return snapset_register_session(dev, snapshot);
 }
 
-
-static int __save_page(const char *path, struct page *page) {
-    struct file *fp = filp_open(path, O_CREAT | O_WRONLY, S_IWUSR);
-    if (IS_ERR_OR_NULL(fp)) {
-        pr_debug(pr_format("cannot open file at %s"), path);
-        return PTR_ERR(fp);
-    }
-    int err = 0;
-    loff_t off;
-    ssize_t n = kernel_write(fp, page, PAGE_SIZE, &off);
-    if (n != PAGE_SIZE) {
-        pr_debug(pr_format("kernel_write failed to write whole page at %s"), path);
-        err = -1;
-    }
-    return try_filp_close(fp, err, path);
-}
-
 static char *h2a(sector_t sector, char *buffer) {
     sprintf(buffer, "%llx", sector);
     return buffer;
 }
 
-static void __save(char *path, struct bio_vec *bvl, struct bvec_iter *iter, const char *parent) {
-    char octet[OCTET_SZ + 1] = {0};
-    path_join(parent, h2a(iter->bi_sector, octet), path);
-    pr_debug(
-        pr_format("saving sector=%llu, off=%d, n=%d to %s"),
-        iter->bi_sector, bvl->bv_offset, bvl->bv_len, path);
+static void save_page(const char *path, struct page *page) {
+    struct file *fp = filp_open(path, O_CREAT | O_WRONLY, 0600);
+    if (IS_ERR(fp)) {
+        pr_debug(pr_format("cannot open file: '%s', got error %ld"), path, PTR_ERR(fp));
+        return;
+    }
+    loff_t off;
+    void *va = kmap_local_page(page);
+    ssize_t n = kernel_write(fp, va, PAGE_SIZE, &off);
+    if (n != PAGE_SIZE) {
+        pr_debug(pr_format("kernel_write failed to write whole page at '%s'"), path);
+    }
+    kunmap_local(va);
+    int err = filp_close(fp, NULL);
+    if (err) {
+        pr_debug(pr_format("filp_close failed to close file at '%s', got error %d"), path, err);
+    }
 }
 
-static void __save2(char *path, struct bio_vec *bvl, int i, const char *parent) {
+static void save_bio(char *path, struct bio *bio, const char *parent) {
+    struct bio_private_data *priv = bio->bi_private;
     char octet[OCTET_SZ + 1] = {0};
-    path_join(parent, h2a(iter->bi_sector, octet), path);
-    pr_debug(
-        pr_format("saving sector=%llu, off=%d, n=%d to %s"),
-        iter->bi_sector, bvl->bv_offset, bvl->bv_len, path);
+    sector_t sector = priv->block.sector;
+    for (int i = 0; i < priv->block.nr_pages; ++i) {
+        path_join(parent, h2a(sector, octet), path);
+        save_page(path, priv->block.pages[i]);
+        sector += PAGE_SIZE;
+    }
 }
 
-static void __save3(char *path, struct bio_vec *bvl, struct bvec_iter_all *iter, const char *parent) {
-    char octet[OCTET_SZ + 1] = {0};
-    path_join(parent, h2a(iter->bi_sector, octet), path);
-    pr_debug(
-        pr_format("saving sector=%llu, off=%d, n=%d to %s"),
-        iter->bi_sector, bvl->bv_offset, bvl->bv_len, path);
-}
-
-
-int snapshot_save(dev_t dev, struct bio *bio) {
+int snapshot_save(struct bio *bio) {
+    dev_t dev = bio->bi_bdev->bd_dev;
     const char *session = snapset_get_session(dev);
     if (!session) {
         pr_debug(
@@ -184,11 +172,7 @@ int snapshot_save(dev_t dev, struct bio *bio) {
         goto free_prefix;
     }
     dbg_dump_bio("snapshot_save\n", bio);
-    struct bio_vec bvl;
-    struct bvec_iter_all iter;
-    bio_for_each_segment_all(bvl, bio, iter) {
-        __save(path, &bvl, &iter, prefix);
-    }
+    save_bio(path, bio, prefix);
     kfree(path);
 free_prefix:
     kfree(prefix);
