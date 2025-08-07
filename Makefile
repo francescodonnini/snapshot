@@ -1,7 +1,6 @@
 obj-m += snapshot.o
 snapshot-objs := 	api/activate_snapshot.o \
 					api/deactivate_snapshot.o \
-					api/find_mount.o \
 					api/hash.o \
 					api/loop_utils.o \
 					api/path_utils.o \
@@ -32,7 +31,6 @@ CFLAGS_kretprobes/kretprobe_handlers.o += -DDEBUG
 CFLAGS_kretprobes/submit_bio.o += -DDEBUG
 CFLAGS_bio/dbg_dump_bio.o += -DDEBUG
 CFLAGS_kretprobes/mount_bdev.o += -DDEBUG
-CFLAGS_api/find_mount.o += -DDEBUG
 CFLAGS_init.o += -DDEBUG
 CFLAGS_api/snapshot.o += -DDEBUG
 CFLAGS_api/path_utils.o += -DDEBUG

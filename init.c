@@ -1,7 +1,6 @@
 #include "bio.h"
 #include "bnull.h"
 #include "chrdev.h"
-#include "find_mount.h"
 #include "pr_format.h"
 #include "probes.h"
 #include "registry.h"
@@ -21,10 +20,6 @@ static int __init snapshot_init(void) {
     err = registry_init();
     if (err) {
         goto registry_failed;
-    }
-    err = procfs_init();
-    if (err) {
-        goto procfs_failed;
     }
     err = chrdev_init();
     if (err) {
@@ -51,8 +46,6 @@ bio_dw_failed:
 bnull_failed:
     chrdev_cleanup();
 chrdev_failed:
-    procfs_cleanup();
-procfs_failed:
     registry_cleanup();
 registry_failed:
     probes_cleanup();
