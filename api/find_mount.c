@@ -1,4 +1,5 @@
 #include "find_mount.h"
+#include "bdget.h"
 #include "pr_format.h"
 #include <linux/fs.h>
 #include <linux/kstrtox.h>
@@ -7,7 +8,9 @@
 #include <linux/string.h>
 #include <linux/slab.h>
 
-#define BUFIO_EOF -1
+#define BUFIO_EOF  -1
+#define LINE_BUFSZ 512
+#define FILE_BUFSZ 1536
 
 /**
  * Facility to hold the fields of a row read from /proc/mounts file
@@ -17,23 +20,34 @@ struct mnts_info {
     const char *mnt_point;
     const char *fs_type;
     const char *mnt_opts;
-    long       dump_freq;
-    long       fsck_order;
+    long        dump_freq;
+    long        fsck_order;
 };
 
 /**
  * Facility to read the content inside a file in a buffered-way.
- * - bufp is the internal buffer used to store chunks of the file
- * - rp is the read position inside the internal buffer (the next character to be read)
- * - size is the amount of valid bytes inside the internal buffer
- * - capacity is the real size of the buffer, no more than this characters could be read from the file
+ * - fp       -- the pointer to the file to read from
+ * - bufp     -- the internal buffer used to store chunks of the file
+ * - rp       -- the read position inside the internal buffer (the next character to be read)
+ * - size     -- the amount of valid bytes inside the internal buffer
+ * - capacity -- the real size of the buffer, no more than this characters could be read from the file
  */
 struct bufio {
     struct file *fp;
     char        *bufp;
-    size_t      rp;
-    size_t      size;
-    size_t      capacity;
+    size_t       size;
+    size_t       capacity;
+    size_t       rp;
+};
+
+/**
+ * Facility to iterate through the lines of /proc/mount. On each iteration, the line read is stored in linep.
+ */
+struct iter {
+    char          *bufp;
+    char          *linep;
+    size_t         linesz;
+    struct bufio   ff;
 };
 
 struct vfsmount *procfs_mnt;
@@ -177,69 +191,114 @@ static int parse_mnts_info(char *line, struct mnts_info *mi) {
     return 0;
 }
 
-/**
- * find_mount - look if a device is already mounted at dev_name path
- * @param dev_name
- * @param found
- * @returns 0 if the search was successfull - i.e. the function was able to find the device or to look for all
- * of them. < 0 is some error occurred.
- */
-int find_mount(const char *dev_name, bool *found) {
-    *found = false;
-    const size_t LINE_BUFSZ = 512;
-    const size_t FILE_BUFSZ = 1536;
+static void init_bufio(struct bufio *ff, char *buf, size_t bufsz, struct file *fp) {
+    ff->bufp = buf;
+    ff->capacity = bufsz;
+    ff->rp = 0;
+    ff->size = 0;
+    ff->fp = fp;
+}
+
+static int __iter_begin(struct iter *it, size_t linesz, size_t file_bufsz, struct file *fp) {
     // common memory pool to buffer both file content and the line read
     char *bufp = kmalloc(LINE_BUFSZ + FILE_BUFSZ, GFP_KERNEL);
     if (!bufp) {
         pr_debug(pr_format("cannot make enough space to parse /proc/mounts file\n"));
         return -ENOMEM;
     }
-    char *file_bufp = bufp;
-    char *line_bufp = &bufp[FILE_BUFSZ];
+    it->bufp = bufp;
+    it->linep = &bufp[file_bufsz];
+    it->linesz = linesz;
+    init_bufio(&it->ff, it->bufp, file_bufsz, fp);
+    return 0;
+}
+
+static int close_file(struct file *fp, int err) {
+    int err2 = filp_close(fp, NULL);
+    if (err2 < 0) {
+        pr_debug(pr_format("cannot close file /proc/mounts because of error %d\n"), err);
+    }
+    if (!err) {
+        return err2;
+    }
+    return err;
+}
+
+static int iter_begin(struct iter *it) {
     struct file *fp = file_open_root_mnt(procfs_mnt, "mounts", O_RDONLY, 0);
     if (IS_ERR(fp)) {
         pr_debug(pr_format("cannot open file /proc/mounts because of error %ld\n"), PTR_ERR(fp));
-        kfree(bufp);
         return PTR_ERR(fp);
     }
-    struct bufio ff = {
-        .bufp = file_bufp,
-        .capacity = FILE_BUFSZ,
-        .fp = fp,
-        .rp = 0,
-        .size = 0
-    };
+    int err = __iter_begin(it, LINE_BUFSZ, FILE_BUFSZ, fp);
+    if (err) {
+        return close_file(fp, err);
+    }
+    return err;
+}
+
+static int iter_end(struct iter *it) {
+    int err = filp_close(it->ff.fp, NULL);
+    if (err < 0) {
+        pr_debug(pr_format("cannot close file /proc/mounts because of error %d\n"), err);
+    }
+    kfree(it->bufp);
+    return err;
+}
+
+static struct mnts_info* iter_next(struct iter *it, struct mnts_info *mi) {
     int err = 0;
-    char *line;
-    while ((line = bufio_getline(line_bufp, LINE_BUFSZ, &ff)) != NULL && !IS_ERR(line)) {
-        struct mnts_info mi;
-        err = parse_mnts_info(line, &mi);
+    char *line = bufio_getline(it->linep, it->linesz, &it->ff);
+    if (line != NULL && !IS_ERR(line)) {
+        err = parse_mnts_info(line, mi);
         if (err) {
             pr_debug(pr_format("cannot parse %s got error %d\n"), line, err);
-            break;
+            return ERR_PTR(err);
         }
-        if (strstr(mi.mnt_dev, "loop") && !strcmp(mi.mnt_point, dev_name)) {
-            *found = true;
-            break;
-        }
-        if (!strcmp(mi.mnt_dev, dev_name)) {
-            *found = true;
-            break;
-        }
+    }
+    if (!line) {
+        return NULL;
     }
     if (IS_ERR(line)) {
         pr_debug(pr_format("cannot complete parsing because of error %ld\n"), PTR_ERR(line));
-        err = PTR_ERR(line);
+        return ERR_CAST(line);
     }
-    int err2 = filp_close(fp, NULL);
-    if (err2 < 0) {
-        pr_debug(pr_format("cannot close file /proc/mounts because of error %d\n"), err2);
-        // if the parsing completed successfully but there was an error while closing
-        // the file we should report this
-        if (!err) {
-            err = err2;
+    return mi;
+}
+
+static bool by_dev_name(struct mnts_info *mip, const char *arg) {
+    char *dev_name = (char*)arg;
+    return (strstr(mip->mnt_dev, "loop") && !strcmp(mip->mnt_point, dev_name))
+           || !strcmp(mip->mnt_dev, dev_name);
+}
+
+static bool by_mountpoint(struct mnts_info *mip, const char *arg) {
+    char *path = (char*)arg;
+    return !strcmp(mip->mnt_point, path);
+}
+
+int get_fdev(const char *mountpoint, dev_t *dev) {
+    struct iter it;
+    int err = iter_begin(&it);
+    if (err) {
+        return err;
+    }
+    struct mnts_info mi;
+    struct mnts_info *mip;
+    bool found = false;
+    while ((mip = iter_next(&it, &mi)) != NULL) {
+        if (IS_ERR(mip)) {
+            err = PTR_ERR(mip);
+            break;
+        }
+        found = by_mountpoint(mip, mountpoint);
+        if (found) {
+            break;
         }
     }
-    kfree(bufp);
+    if (found) {
+        err = bdev_from_file(mip->mnt_dev, dev);
+    }
+    iter_end(&it);
     return err;
 }

@@ -1,6 +1,9 @@
 #include "registry.h"
+#include "bdget.h"
+#include "fast_hash.h"
 #include "hash.h"
 #include "pr_format.h"
+#include "snapshot.h"
 #include <linux/blkdev.h>
 #include <linux/list.h>
 #include <linux/printk.h>
@@ -8,15 +11,18 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/types.h>
+#include <linux/uuid.h>
+
 #define SHA1_HASH_LEN (20)
 
 struct registry_entity {
-    struct list_head list;
+    struct list_head     list;
     // speed up searches by making string comparisons only on collisions or matches
-    unsigned long    dev_name_hash; 
-    char            *dev_name;
-    char            *password;
-    dev_t           dev;
+    unsigned long        dev_name_hash; 
+    char                *dev_name;
+    char                *password;
+    char                *session_id;
+    dev_t                dev;
 };
 
 DEFINE_SPINLOCK(write_lock);
@@ -46,16 +52,6 @@ void registry_cleanup(void) {
     }
 }
 
-// non-cryptographic hash function created by Glenn Fowler, Landon Curt Noll, and Kiem-Phong Vo
-static unsigned long fast_hash(const char *name) {
-    unsigned long h = 0xcbf29ce484222325;
-    for (const char *c = name; *c; ++c) {
-        h *= 0x100000001b3;
-        h ^= *c;
-    }
-    return h;
-}
-
 static struct registry_entity* mk_node(const char *dev_name, const char *password) {
     int err;
     size_t n = strnlen(dev_name, PATH_MAX);
@@ -63,7 +59,7 @@ static struct registry_entity* mk_node(const char *dev_name, const char *passwor
         err = -ETOOBIG;
         goto no_node;
     }
-    size_t total_size = sizeof(struct registry_entity) + sizeof(long) + (n + 1) + SHA1_HASH_LEN;
+    size_t total_size = sizeof(struct registry_entity) + (n + 1) + SHA1_HASH_LEN + (UUID_STRING_LEN + 1);
     struct registry_entity *node = kmalloc(total_size, GFP_KERNEL);
     if (node == NULL) {
         err = -ENOMEM;
@@ -72,12 +68,13 @@ static struct registry_entity* mk_node(const char *dev_name, const char *passwor
     node->list.prev = NULL;
     node->list.next = NULL;
     node->dev_name_hash = fast_hash(dev_name);
-    node->dev_name = (char*) node + sizeof(struct registry_entity) + sizeof(long);
+    node->dev_name = (char*) node + sizeof(struct registry_entity);
     node->password = node->dev_name + (n + 1);
     err = hash2("sha1", password, strlen(password), node->password, SHA1_HASH_LEN);
     if (err) {
         goto free_node;
     }
+    node->session_id = node->password + SHA1_HASH_LEN;
     strscpy(node->dev_name, dev_name, n + 1);
     return node;
 
@@ -116,19 +113,25 @@ static int try_add(struct registry_entity *ep) {
     return 0;
 }
 
-static int try_get_dev(const char *dev_name, dev_t *dev) {
-    struct file *fp = bdev_file_open_by_path(dev_name, BLK_OPEN_READ, NULL, NULL);
-    if (IS_ERR(fp)) {
-        pr_debug(pr_format("failed to open block device '%s', got error %ld\n"), dev_name, PTR_ERR(fp));
-        return PTR_ERR(fp);
+static int gen_uuid(char *out, size_t n) {
+    uuid_t uuid;
+    uuid_gen(&uuid);
+    int err = snprintf(out, n, "%pUb", &uuid);
+    if (err != n - 1) {
+        pr_debug(pr_format("cannot parse uuid"));
+        return -err;
     }
-    *dev = file_bdev(fp)->bd_dev;
-    pr_debug(
-        pr_format("device number for '%s' is (%d, %d)"),
-        dev_name,
-        MAJOR(*dev), MINOR(*dev));
-    filp_close(fp, NULL);
     return 0;
+}
+
+static int update_dev(struct registry_entity *e, dev_t dev) {
+    e->dev = dev;
+    int err = gen_uuid(e->session_id, UUID_STRING_LEN + 1);
+    if (err < 0) {
+        return -1;
+    }
+    pr_debug(pr_format("node %s has maj,min=%d,%d and uuid=%s"), e->dev_name, MAJOR(dev), MINOR(dev), e->session_id);
+    return snapshot_create(e->dev, e->session_id);
 }
 
 /**
@@ -143,16 +146,20 @@ int registry_insert(const char *dev_name, const char *password) {
     if (IS_ERR(ep)) {
         return PTR_ERR(ep);
     }
+    pr_debug(pr_format("created node: %s\n"), ep->dev_name);
     dev_t dev;
-    int err = try_get_dev(dev_name, &dev);
+    int err = bdev_from_file(dev_name, &dev);
     if (!err) {
-        ep->dev = dev;
+        err = update_dev(ep, dev);
+        if (err) {
+            goto out;
+        }
     }
-    pr_debug(pr_fmt("created node: %s\n"), ep->dev_name);
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
     err = try_add(ep);
     spin_unlock_irqrestore(&write_lock, flags);
+out:
     if (err) {
         kfree(ep);
     }
@@ -205,7 +212,7 @@ bool registry_check_password(const char *dev_name, const char *password) {
     return b;
 }
 
-static bool registry_lookup_aux(bool(*pred)(struct registry_entity*, void *args), void *args) {
+static inline bool registry_lookup_aux(bool(*pred)(struct registry_entity*, void *args), void *args) {
     struct registry_entity *it;
     bool b = false;
     rcu_read_lock();
@@ -219,7 +226,7 @@ static bool registry_lookup_aux(bool(*pred)(struct registry_entity*, void *args)
     return b;
 }
 
-static bool by_dev_name(struct registry_entity *it, void *args) {
+static inline bool by_dev_name(struct registry_entity *it, void *args) {
     const char *dev_name = (const char*)args;
     return it->dev_name_hash == fast_hash(dev_name) && 
            !strcmp(it->dev_name, dev_name);
@@ -229,7 +236,7 @@ bool registry_lookup(const char *dev_name) {
     return registry_lookup_aux(by_dev_name, (void*)dev_name);
 }
 
-static bool by_mm(struct registry_entity *it, void *args) {
+static inline bool by_mm(struct registry_entity *it, void *args) {
     dev_t *dev = (dev_t*)args;
     return it->dev == *dev;
 }
@@ -238,6 +245,12 @@ bool registry_lookup_mm(dev_t dev) {
     return registry_lookup_aux(by_mm, (void*)&dev);
 }
 
+/**
+ * registry_update - updates a previously registered image/device with the associated device number
+ * @param dev_name - the path of the image associated with the device
+ * @param dev      - the device number associated to the device
+ * @returns 0 on success, <0 otherwise.
+ */
 int registry_update(const char *dev_name, dev_t dev) {
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
@@ -245,12 +258,10 @@ int registry_update(const char *dev_name, dev_t dev) {
     int err = 0;
     if (!ep) {
         err = -1;
-        goto RELEASE_LOCK;
+        goto ru_release_lock;
     }
-    ep->dev = dev;
-    pr_debug(pr_fmt("updated node: %s, major: %d, minor: %d\n"), 
-             ep->dev_name, MAJOR(ep->dev), MINOR(ep->dev));
-RELEASE_LOCK:
+    err = update_dev(ep, dev);
+ru_release_lock:
     spin_unlock_irqrestore(&write_lock, flags);
     return err;
 }

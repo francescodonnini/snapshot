@@ -1,9 +1,11 @@
 #include "bio.h"
+#include "bnull.h"
 #include "chrdev.h"
 #include "find_mount.h"
 #include "pr_format.h"
 #include "probes.h"
 #include "registry.h"
+#include "snapshot.h"
 #include <linux/crypto.h>
 #include <linux/init.h>
 #include <linux/module.h>
@@ -28,13 +30,25 @@ static int __init snapshot_init(void) {
     if (err) {
         goto chrdev_failed;
     }
+    err = bnull_init();
+    if (err) {
+        goto bnull_failed;
+    }
     err = bio_deferred_work_init();
     if (err) {
         goto bio_dw_failed;
     }
+    err = snapshotfs_init();
+    if (err) {
+        goto snapshotfs_init_failed;
+    }
     return 0;
 
+snapshotfs_init_failed:
+    bio_deferred_work_cleanup();
 bio_dw_failed:
+    bnull_cleanup();
+bnull_failed:
     chrdev_cleanup();
 chrdev_failed:
     procfs_cleanup();

@@ -1,4 +1,5 @@
 #include "kretprobe_handlers.h"
+#include "loop_utils.h"
 #include "pr_format.h"
 #include "registry.h"
 #include <linux/blk-mq.h>
@@ -10,39 +11,7 @@
 #include <linux/major.h>
 #include <linux/printk.h>
 
-
-struct loop_device {
-	int                      lo_number;
-	loff_t		             lo_offset;
-	loff_t		             lo_sizelimit;
-	int		                 lo_flags;
-	char		             lo_file_name[LO_NAME_SIZE];
-
-	struct file	            *lo_backing_file;
-	unsigned int	         lo_min_dio_size;
-	struct block_device     *lo_device;
-
-	gfp_t old_gfp_mask;
-
-	spinlock_t               lo_lock;
-	int                      lo_state;
-	spinlock_t               lo_work_lock;
-	struct workqueue_struct *workqueue;
-	struct work_struct       rootcg_work;
-	struct list_head         rootcg_cmd_list;
-	struct list_head         idle_worker_list;
-	struct rb_root           worker_tree;
-	struct timer_list        timer;
-	bool                     sysfs_inited;
-
-	struct request_queue	*lo_queue;
-	struct blk_mq_tag_set	 tag_set;
-	struct gendisk		    *lo_disk;
-	struct mutex		     lo_mutex;
-	bool			         idr_visible;
-};
-
-static inline struct file_system_type* get_fstype(struct pt_regs *regs) {
+static inline struct file_system_type* get_file_system_type(struct pt_regs *regs) {
     return get_arg1(struct file_system_type*, regs);
 }
 
@@ -53,7 +22,7 @@ static inline char* get_dev_name(struct pt_regs *regs) {
 int mount_bdev_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     pr_debug(
         pr_format("mount_bdev(%s, %s) called\n"),
-        get_fstype(regs)->name,
+        get_file_system_type(regs)->name,
         get_dev_name(regs));
     // store the device name in the kretprobe instance data
     // so that it can be used in the return handler to check if the device has been successfully mounted
@@ -62,8 +31,13 @@ int mount_bdev_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
     return 0;
 }
 
-static inline bool is_loop_device(struct block_device *bdev) {
-    return MAJOR(bdev->bd_dev) == LOOP_MAJOR;
+static inline int try_update_loop_dev(struct block_device *bdev, char *buf) {
+    const char *ip = backing_loop_device_file(bdev, buf);    
+    if (IS_ERR(ip)) {
+        return PTR_ERR(ip);
+    } else {
+        return registry_update(ip, bdev->bd_dev);
+    }
 }
 
 static int registry_update_loop_device(struct block_device *bdev) {
@@ -71,18 +45,17 @@ static int registry_update_loop_device(struct block_device *bdev) {
     if (!buf) {
         return -ENOMEM;
     }
-    struct loop_device *lo = (struct loop_device*)bdev->bd_disk->private_data;
-    char *ip = d_path(&lo->lo_backing_file->f_path, buf, PATH_MAX);
-    int err = 0;
-    if (IS_ERR(ip)) {
-        err = PTR_ERR(ip);
-    } else {
-        err = registry_update(ip, bdev->bd_dev);
-    }
+    int err = try_update_loop_dev(bdev, buf);
     kfree(buf);
     return err;
 }
 
+/**
+ * mount_bdev_handler -- checks whether mount_bdev completed successfully, then it registers
+ * the device number (MAJOR, minor) in the registry if the block device just mounted was previously
+ * registered by the user (using the 'activate snapshot' command). When the device number is added to the
+ * registry, a folder for the blocks snapshot is created in /snapshots.
+ */
 int mount_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     struct dentry *dentry = get_rval(struct dentry*, regs);
     if (IS_ERR(dentry)) {

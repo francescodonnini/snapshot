@@ -1,7 +1,9 @@
 #include "bio.h"
+#include "bnull.h"
 #include "kretprobe_handlers.h"
 #include "pr_format.h"
 #include "registry_lookup.h"
+#include "snapset.h"
 #include <linux/bio.h>
 #include <linux/types.h>
 
@@ -28,20 +30,26 @@ static bool skip_bio(struct bio *bio) {
     return b;
 }
 
-static void init_dummy_bio(struct bio *bio, struct bio *orig) {
+static void init_dummy_bio(struct bio *bio) {
     bio->bi_end_io = dummy_end_io;
-    bio->bi_iter.bi_sector = orig->bi_iter.bi_sector;
-    bio->bi_iter.bi_size = 0;
 }
 
 static struct bio *create_dummy_bio(struct bio *orig_bio) {
-    struct bio *dummy = bio_alloc(orig_bio->bi_bdev, 0, REQ_OP_WRITE, GFP_ATOMIC);
+    struct bio *dummy = bio_alloc(bnull_get_bdev(), 0, REQ_OP_READ, GFP_ATOMIC);
     if (!dummy) {
         pr_debug(pr_format("cannot create a dummy bio request for device (%d, %d)\n"), MAJOR(orig_bio->bi_bdev->bd_dev), MINOR(orig_bio->bi_bdev->bd_dev));
         return NULL;
     }
-    init_dummy_bio(dummy, orig_bio);
+    init_dummy_bio(dummy);
     return dummy;
+}
+
+static inline dev_t bio_devnum(struct bio *bio) {
+    return bio->bi_bdev->bd_dev;
+}
+
+static inline sector_t bio_sector(struct bio *bio) {
+    return bio->bi_iter.bi_sector;
 }
 
 int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
@@ -52,7 +60,8 @@ int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
     // * the request was sent to a device not registered;
     if (!bio
         || !op_is_write(bio_op(bio))
-        || !registry_lookup_mm(bio->bi_bdev->bd_dev)
+        || !registry_lookup_mm(bio_devnum(bio))
+        || !snapset_add_sector(bio_devnum(bio), bio_sector(bio))
         || skip_bio(bio)) {
         return 1;
     }
@@ -61,11 +70,11 @@ int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
         return 1;
     }
     if (!bio_enqueue(bio)) {
-        pr_debug(pr_format("cannot enqueue bio for device (%d, %d)\n"), MAJOR(bio->bi_bdev->bd_dev), MINOR(bio->bi_bdev->bd_dev));
+        pr_debug(pr_format("cannot enqueue bio for device (%d, %d)\n"), MAJOR(bio_devnum(bio)), MINOR(bio_devnum(bio)));
         return 1;
     }
     bio_mark(bio);
-    pr_debug(pr_format("submit_bio called on device (%d, %d)\n"), MAJOR(bio->bi_bdev->bd_dev), MINOR(bio->bi_bdev->bd_dev));
+    pr_debug(pr_format("submit_bio called on device (%d, %d)\n"), MAJOR(bio_devnum(bio)), MINOR(bio_devnum(bio)));
     set_arg1(regs, (unsigned long)dummy_bio);
     return 0;
 }

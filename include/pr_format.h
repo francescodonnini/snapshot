@@ -4,6 +4,6 @@
 
 // adds some informations to the printk format string.
 // e.g. printk(pr_format("hello")) prints "[<MODULE NAME>] hello"
-#define pr_format(fmt) "[%s] " "" fmt, module_name(THIS_MODULE)
+#define pr_format(fmt) "[%s] %s: " "" fmt, module_name(THIS_MODULE), __FUNCTION__
 
 #endif

@@ -6,6 +6,6 @@ int procfs_init(void);
 
 void procfs_cleanup(void);
 
-int find_mount(const char *dev_name, bool *found);
+int get_fdev(const char *mntpnt, dev_t *dev);
 
 #endif

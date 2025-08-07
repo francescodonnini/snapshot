@@ -41,8 +41,10 @@ void dbg_dump_bio(const char *prefix, struct bio *bio) {
             "refcnt              =%d\n"
             "opf                 =%d (%s)\n"
             "vcnt                =%d\n"
-            "iter::sector_size   =%lld\n"
-            "iter::size=%d\n"),
+            "iter::bvec_done     =%s\n"
+            "iter::idx           =%d\n"
+            "iter::sector        =%lld\n"
+            "iter::size=%u\n"),
         prefix,
         bio,
         MAJOR(bio->bi_bdev->bd_dev), MINOR(bio->bi_bdev->bd_dev),
@@ -51,6 +53,8 @@ void dbg_dump_bio(const char *prefix, struct bio *bio) {
         atomic_read(&bio->__bi_cnt),
         bio_op(bio), bio_op_str(bio),
         bio->bi_vcnt,
+        bool_str(bio->bi_iter.bi_bvec_done),
+        bio->bi_iter.bi_idx,
         bio->bi_iter.bi_sector,
         bio->bi_iter.bi_size
     );
