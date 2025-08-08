@@ -1,9 +1,7 @@
 #include "hash.h"
 #include "pr_format.h"
-#include <linux/errname.h>
 #include <crypto/hash.h>
 #include <linux/printk.h>
-#include <linux/string.h>
 #include <linux/types.h>
 
 static int init_shash(const char *alg_name, struct shash_desc **desc_out) {
