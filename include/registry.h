@@ -10,10 +10,12 @@
 #define EDUPNAME   5000
 #define ETOOBIG    5001
 #define EWRONGCRED 5002
-
+#define ENOUUID    5003
 int registry_init(void);
 
 void registry_cleanup(void);
+
+bool registry_get_session(dev_t dev, char *session);
 
 int registry_insert(const char *dev_name, const char *password);
 

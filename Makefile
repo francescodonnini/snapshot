@@ -5,7 +5,7 @@ snapshot-objs := 	api/activate_snapshot.o \
 					api/loop_utils.o \
 					api/path_utils.o \
 					api/registry_rcu.o \
-					api/snapset_rcu.o \
+					api/hashset_rcu.o \
 					api/snapshot.o \
 					bio/bio_enqueue.o \
 					bio/dbg_dump_bio.o \
@@ -22,18 +22,13 @@ PWD := $(CURDIR)
 
 ccflags-y += -I$(src)/include
 
+CFLAGS_api/hashset_rcu.o += -DDEBUG
 CFLAGS_api/registry_rcu.o += -DDEBUG
+CFLAGS_api/snapshot.o += -DDEBUG
 CFLAGS_bio/bio_enqueue.o += -DDEBUG
-CFLAGS_bnull/bnull.o += -DDEBUG
-CFLAGS_ioctl/chrdev_ioctl.o += -DDEBUG
-CFLAGS_ioctl/chrdev.o += -DDEBUG
-CFLAGS_kretprobes/kretprobe_handlers.o += -DDEBUG
 CFLAGS_kretprobes/submit_bio.o += -DDEBUG
 CFLAGS_bio/dbg_dump_bio.o += -DDEBUG
 CFLAGS_kretprobes/mount_bdev.o += -DDEBUG
-CFLAGS_init.o += -DDEBUG
-CFLAGS_api/snapshot.o += -DDEBUG
-CFLAGS_api/path_utils.o += -DDEBUG
 
 all: 
 		make -C /lib/modules/$(shell uname -r)/build M=$(PWD)  modules 

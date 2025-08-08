@@ -36,9 +36,6 @@ static blk_status_t null_queue_rq(struct blk_mq_hw_ctx *hctx,
             MAJOR(dev->bdev->bd_dev),
             MINOR(dev->bdev->bd_dev));
     }
-    if (rq->bio) {
-        dbg_dump_bio("processing bio:\n", rq->bio);
-    }
     blk_mq_end_request(rq, BLK_STS_OK);
     return BLK_STS_OK;
 }

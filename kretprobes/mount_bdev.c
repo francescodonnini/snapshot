@@ -59,7 +59,7 @@ static inline void dbg_already_registered(const char *dev_name, struct block_dev
 }
 
 /**
- * mount_bdev_handler -- checks whether mount_bdev completed successfully, then it registers
+ * mount_bdev_handler checks whether mount_bdev completed successfully, then it registers
  * the device number (MAJOR, minor) in the registry if the block device just mounted was previously
  * registered by the user (using the 'activate snapshot' command). When the device number is added to the
  * registry, a folder for the blocks snapshot is created in /snapshots.

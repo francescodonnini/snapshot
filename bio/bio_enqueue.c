@@ -1,4 +1,5 @@
 #include "bio.h"
+#include "bio_utils.h"
 #include "pr_format.h"
 #include "snapshot.h"
 #include <linux/bio.h>
@@ -37,7 +38,6 @@ static void dbg_dump_bio_content(struct bio *bio) {
         print_hex_dump_bytes("data: ", DUMP_PREFIX_OFFSET, va, 64);
         kunmap_local(va);
     }
-    dbg_dump_bio("after dumping content:\n", bio);
 }
 
 static void dbg_dump_read_bio(struct bio *bio) {
@@ -49,7 +49,6 @@ static void read_original_block_end_io(struct bio *bio) {
     dbg_dump_read_bio(bio);
     snapshot_save(bio);
     struct bio_private_data *priv = bio->bi_private;
-    dbg_dump_bio("original bio\n", priv->orig_bio);
     submit_bio(priv->orig_bio);
 }
 
@@ -80,7 +79,6 @@ static inline void free_bio_pages(struct bio *bio) {
 }
 
 static int allocate_pages(struct bio *bio, int nr_pages) {
-    dbg_dump_bio("allocate_pages: called with\n", bio);
     int err = 0;
     for (int i = 0; i < nr_pages; ++i) {
         struct page *page = alloc_page(GFP_KERNEL);
@@ -95,7 +93,6 @@ static int allocate_pages(struct bio *bio, int nr_pages) {
             goto allocate_pages_out;
         }
     }
-    dbg_dump_bio("all pages have been added successfully\n", bio);
     return err;
 
 allocate_pages_out:
@@ -105,10 +102,6 @@ allocate_pages_out:
 
 static inline unsigned int bio_nr_pages(struct bio *bio) {
     return (bio->bi_iter.bi_size + PAGE_SIZE - 1) / PAGE_SIZE;
-}
-
-static inline sector_t bio_sector(struct bio *bio) {
-    return bio->bi_iter.bi_sector;
 }
 
 static struct bio_private_data *mk_private_data(sector_t sector, int nr_pages) {
@@ -154,14 +147,12 @@ static struct bio* init_read_bio(struct bio *orig_bio) {
         bio_put(read_bio);
         return NULL;
     }
-    dbg_dump_bio("read bio created successfully\n", read_bio);
     return read_bio;
 }
 
 static void process_bio(struct work_struct *work) {
     struct bio_work *w = container_of(work, struct bio_work, work);
     struct bio *orig_bio = w->orig_bio;
-    dbg_dump_bio("work-queue is processing original (WRITE) bio\n", orig_bio);
     struct bio *rb = init_read_bio(orig_bio);
     if (!rb) {
         submit_bio(orig_bio);

@@ -1,8 +1,9 @@
 #include "snapshot.h"
+#include "bio_utils.h"
 #include "fast_hash.h"
 #include "path_utils.h"
 #include "pr_format.h"
-#include "snapset.h"
+#include "registry.h"
 #include <linux/bio.h>
 #include <linux/bvec.h>
 #include <linux/fs.h>
@@ -59,22 +60,11 @@ int snapshotfs_init(void) {
         return err;
     }
     pr_debug(pr_format("directory %s created successfully"), ROOT_DIR);
-    return snapset_init();
+    return hashset_pool_init();
 }
 
 void snapshotfs_cleanup(void) {
-    snapset_cleanup();
-}
-
-static int try_filp_close(struct file *fp, int err, const char *path) {
-    int err2 = filp_close(fp, NULL);
-    if (err2) {
-        pr_debug(pr_format("cannot close file %s, got error %d"), path, err2);
-    }
-    if (!err) {
-        return err2;
-    }
-    return err;
+    hashset_pool_cleanup();
 }
 
 static int mkdir_session(const char *session) {
@@ -109,15 +99,15 @@ parent_path_put:
  *                    command
  * @returns 0 on success, <0 otherwise.
  */
-int snapshot_create(dev_t dev, const char *snapshot) {
-    int err = mkdir_session(snapshot);
+int snapshot_create(dev_t dev, const char *session, struct hashset *set) {
+    int err = mkdir_session(session);
     if (err) {
         return err;
     }
-    return snapset_register_session(dev, snapshot);
+    return hashset_register(dev, set);
 }
 
-static char *h2a(sector_t sector, char *buffer) {
+static inline char *h2a(sector_t sector, char *buffer) {
     sprintf(buffer, "%llx", sector);
     return buffer;
 }
@@ -142,6 +132,7 @@ static void save_page(const char *path, struct page *page) {
 }
 
 static void save_bio(char *path, struct bio *bio, const char *parent) {
+    dbg_dump_bio("save_bio\n", bio);
     struct bio_private_data *priv = bio->bi_private;
     char octet[OCTET_SZ + 1] = {0};
     sector_t sector = priv->block.sector;
@@ -153,28 +144,33 @@ static void save_bio(char *path, struct bio *bio, const char *parent) {
 }
 
 int snapshot_save(struct bio *bio) {
-    dev_t dev = bio->bi_bdev->bd_dev;
-    const char *session = snapset_get_session(dev);
+    char *session = kmalloc(UUID_STRING_LEN + 1, GFP_KERNEL);
     if (!session) {
-        pr_debug(
-            pr_format("cannot find session associated with device %d,%d"),
-            MAJOR(dev), MINOR(dev));
-        return -1;
-    }
-    char *prefix = path_join_alloc(ROOT_DIR, session);
-    if (!prefix) {
+        pr_debug(pr_format("cannot make enough space to hold session id"));
         return -ENOMEM;
     }
     int err = 0;
-    char *path = kmalloc(strlen(prefix) + OCTET_SZ + 2, GFP_KERNEL);
+    bool found = registry_get_session(bio_devnum(bio), session);
+    if (!found) {
+        pr_debug(pr_format("cannot find session associated with device %d,%d"), MAJOR(bio_devnum(bio)), MINOR(bio_devnum(bio)));
+        err = -EWRONGCRED;
+        goto snapshot_save_free_session;
+    }
+    char *parent = path_join_alloc(ROOT_DIR, session);
+    if (!parent) {
+        err = -ENOMEM;
+        goto snapshot_save_free_session;
+    }
+    char *path = kmalloc(strlen(parent) + OCTET_SZ + 2, GFP_KERNEL);
     if (!path) {
         err = -ENOMEM;
-        goto free_prefix;
+        goto snapshot_save_free_parent;
     }
-    dbg_dump_bio("snapshot_save\n", bio);
-    save_bio(path, bio, prefix);
+    save_bio(path, bio, parent);
     kfree(path);
-free_prefix:
-    kfree(prefix);
+snapshot_save_free_parent:
+    kfree(parent);
+snapshot_save_free_session:
+    kfree(session);
     return err;
 }

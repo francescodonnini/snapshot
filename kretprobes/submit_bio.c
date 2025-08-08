@@ -1,9 +1,10 @@
 #include "bio.h"
+#include "bio_utils.h"
 #include "bnull.h"
+#include "hashset.h"
 #include "kretprobe_handlers.h"
 #include "pr_format.h"
 #include "registry_lookup.h"
-#include "snapset.h"
 #include <linux/bio.h>
 #include <linux/types.h>
 
@@ -12,7 +13,6 @@
 #define BIO_BITMASK (0x8000)
 
 static void dummy_end_io(struct bio *bio) {
-    dbg_dump_bio("dummy_end_io called on\n", bio);
     bio_put(bio);
 }
 
@@ -22,6 +22,19 @@ static inline void bio_mark(struct bio *bio) {
 
 static inline void bio_unmark(struct bio *bio) {
     bio->bi_flags &= ~BIO_BITMASK;
+}
+
+static bool discard_bio(struct bio *bio) {
+    bool found;
+    int err = hashset_add(bio_devnum(bio), bio_sector(bio), &found);
+    if (err) {
+        pr_debug(pr_format("hashset_add completed with error %d"), err);
+        return false;
+    }
+    if (found) {
+        pr_debug(pr_format("discarded bio with dev=%d and sector=%llu"), bio_devnum(bio), bio_sector(bio));
+    }
+    return found;
 }
 
 /**
@@ -52,14 +65,6 @@ static struct bio *create_dummy_bio(struct bio *orig_bio) {
     return dummy;
 }
 
-static inline dev_t bio_devnum(struct bio *bio) {
-    return bio->bi_bdev->bd_dev;
-}
-
-static inline sector_t bio_sector(struct bio *bio) {
-    return bio->bi_iter.bi_sector;
-}
-
 /**
  * This entry handler do the following steps:
  * 1. Checks if the bio should be intercepted. A bio request should be intercepted if it's
@@ -85,7 +90,7 @@ int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
     if (!bio
         || !op_is_write(bio_op(bio))
         || !registry_lookup_mm(bio_devnum(bio))
-        || !snapset_add_sector(bio_devnum(bio), bio_sector(bio))
+        || discard_bio(bio)
         || skip_bio(bio)) {
         return 1;
     }

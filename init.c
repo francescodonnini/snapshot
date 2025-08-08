@@ -13,7 +13,11 @@
 #include <linux/types.h>
 
 static int __init snapshot_init(void) {
-    int err = probes_init();
+    int err = snapshotfs_init();
+    if (err) {
+        goto snapshotfs_init_failed;
+    }
+    err = probes_init();
     if (err) {
         goto probes_failed;
     }
@@ -33,14 +37,8 @@ static int __init snapshot_init(void) {
     if (err) {
         goto bio_dw_failed;
     }
-    err = snapshotfs_init();
-    if (err) {
-        goto snapshotfs_init_failed;
-    }
     return 0;
 
-snapshotfs_init_failed:
-    bio_deferred_work_cleanup();
 bio_dw_failed:
     bnull_cleanup();
 bnull_failed:
@@ -50,6 +48,8 @@ chrdev_failed:
 registry_failed:
     probes_cleanup();
 probes_failed:
+    snapshotfs_cleanup();
+snapshotfs_init_failed:
     return err;
 }
 

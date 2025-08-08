@@ -1,6 +1,7 @@
 #include "registry.h"
 #include "fast_hash.h"
 #include "hash.h"
+#include "hashset.h"
 #include "pr_format.h"
 #include "snapshot.h"
 #include <linux/blkdev.h>
@@ -22,6 +23,7 @@ struct registry_entity {
     char                *password;
     char                *session_id;
     dev_t                dev;
+    struct hashset      *set;
 };
 
 DEFINE_SPINLOCK(write_lock);
@@ -88,6 +90,11 @@ static struct registry_entity* mk_node(const char *dev_name, const char *passwor
     }
     node->session_id = node->password + SHA1_HASH_LEN;
     strscpy(node->dev_name, dev_name, n + 1);
+    struct hashset *set = hashset_create();
+    if (IS_ERR(set)) {
+        goto free_node;
+    }
+    node->set = set;
     return node;
 
 free_node:
@@ -153,9 +160,9 @@ static int update_dev(struct registry_entity *e, dev_t dev) {
     e->dev = dev;
     int err = gen_uuid(e->session_id, UUID_STRING_LEN + 1);
     if (err < 0) {
-        return -1;
+        return -ENOUUID;
     }
-    return snapshot_create(e->dev, e->session_id);
+    return snapshot_create(e->dev, e->session_id, e->set);
 }
 
 /**
@@ -170,7 +177,6 @@ int registry_insert(const char *dev_name, const char *password) {
     spin_lock_irqsave(&write_lock, flags);
     int err = try_add(ep);
     spin_unlock_irqrestore(&write_lock, flags);
-out:
     if (err) {
         kfree(ep);
     }
@@ -208,8 +214,10 @@ int registry_delete(const char *dev_name, const char *password) {
         err = 0;
     }
     spin_unlock_irqrestore(&write_lock, flags);
-    synchronize_rcu();
-    kfree(ep);
+    if (!err) {
+        synchronize_rcu();
+        kfree(ep);
+    }
     return err;
 }
 
@@ -267,11 +275,26 @@ int registry_update(const char *dev_name, dev_t dev) {
     struct registry_entity *ep = get_raw(dev_name);
     int err = 0;
     if (!ep) {
-        err = -1;
-        goto ru_release_lock;
+        err = -EWRONGCRED;
+        goto registry_update_out;
     }
     err = update_dev(ep, dev);
-ru_release_lock:
+registry_update_out:
     spin_unlock_irqrestore(&write_lock, flags);
     return err;
+}
+
+bool registry_get_session(dev_t dev, char *session) {
+    rcu_read_lock();
+    bool found = false;
+    struct registry_entity *it;
+    list_for_each_entry_rcu(it, &registry_db, list) {
+        found = it->dev == dev;
+        if (found) {
+            strncpy(session, it->session_id, UUID_STRING_LEN + 1);
+            break;
+        }
+    }
+    rcu_read_unlock();
+    return found;
 }
