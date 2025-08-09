@@ -21,7 +21,9 @@ int registry_insert(const char *dev_name, const char *password);
 
 int registry_delete(const char *dev_name, const char *password);
 
-bool registry_lookup_mm(dev_t dev);
+bool registry_lookup_active(dev_t dev);
+
+bool registry_lookup_dev(dev_t dev);
 
 int registry_update(const char *dev_name, dev_t dev);
 

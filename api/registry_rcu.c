@@ -213,11 +213,20 @@ static inline bool by_mm(struct registry_entity *it, void *args) {
 }
 
 /**
- * registry_lookup_mm returns true if there exists a registered entity associated with the device number (dev),
+ * registry_lookup_dev returns true if there exists a registered entity associated with the device number (dev),
  * false otherwise.
  */
-bool registry_lookup_mm(dev_t dev) {
+bool registry_lookup_dev(dev_t dev) {
     return registry_lookup_rcu(by_mm, (void*)&dev);
+}
+
+static inline bool is_active(struct registry_entity *it, void *args) {
+    dev_t *dev = (dev_t*)args;
+    return it->dev == *dev && !it->session_id;
+}
+
+bool registry_lookup_active(dev_t dev) {
+    return registry_lookup_rcu(is_active, (void*)&dev);
 }
 
 /**

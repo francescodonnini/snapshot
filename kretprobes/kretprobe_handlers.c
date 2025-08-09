@@ -28,6 +28,7 @@ static struct kretprobe umount_kretprobe = {
 static struct kretprobe *kretprobe_table[] = {
     &submit_bio_kretprobe,
     &mount_bdev_kretprobe,
+    &umount_kretprobe,
 };
 static size_t KRETPROBES_NUM = sizeof(kretprobe_table) / sizeof(struct kretprobe *);
 

@@ -30,6 +30,7 @@ CFLAGS_bio/bio_enqueue.o += -DDEBUG
 CFLAGS_kretprobes/submit_bio.o += -DDEBUG
 CFLAGS_bio/dbg_dump_bio.o += -DDEBUG
 CFLAGS_kretprobes/mount_bdev.o += -DDEBUG
+CFLAGS_kretprobes/path_umount.o += -DDEBUG
 
 all: 
 		make -C /lib/modules/$(shell uname -r)/build M=$(PWD)  modules 

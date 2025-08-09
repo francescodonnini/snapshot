@@ -89,7 +89,7 @@ int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
     // * the request was sent to a device not registered;
     if (!bio
         || !op_is_write(bio_op(bio))
-        || !registry_lookup_mm(bio_devnum(bio))
+        || !registry_lookup_active(bio_devnum(bio))
         || discard_bio(bio)
         || skip_bio(bio)) {
         return 1;

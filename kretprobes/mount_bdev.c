@@ -72,7 +72,7 @@ int mount_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     }
     struct mount_bdev_data *data = (struct mount_bdev_data*)kp->data;
     struct block_device *bdev = dentry->d_sb->s_bdev;
-    if (registry_lookup_mm(bdev->bd_dev)) {
+    if (registry_lookup_dev(bdev->bd_dev)) {
         dbg_already_registered(data->dev_name, bdev);
         return 0;
     }

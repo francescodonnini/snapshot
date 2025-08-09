@@ -144,7 +144,6 @@ static inline struct session_obj *mk_session_obj(dev_t dev, struct hashset *set)
     }
     obj->key = dev;
     obj->set = set;
-    pr_debug(pr_format("mk_session(%d)"), dev);
     return obj;
 }
 
