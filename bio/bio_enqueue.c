@@ -18,8 +18,8 @@ static struct workqueue_struct *wq;
 int bio_deferred_work_init(void) {
     wq = create_workqueue("bio_wq");
     if (!wq) {
-        pr_debug(pr_format("cannot create wq for bio(s)\n"));
-        return -1;
+        pr_debug(pr_format("cannot create wq for bio(s)"));
+        return -ENOMEM;
     }
     return 0;
 }

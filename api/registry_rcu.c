@@ -297,3 +297,22 @@ bool registry_get_session(dev_t dev, char *session) {
     rcu_read_unlock();
     return found;
 }
+
+void registry_end_session(dev_t dev) {
+    rcu_read_lock();
+    bool found = false;
+    struct registry_entity *it;
+    list_for_each_entry_rcu(it, &registry_db, list) {
+        found = it->dev == dev;
+        if (found) {
+            break;
+        }
+    }
+    if (!found) {
+        goto registry_end_session_out;
+    }
+    *(it->session_id) = 0;
+    hashset_clear(dev, &it->set);
+registry_end_session_out:
+    rcu_read_unlock();
+}

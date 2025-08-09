@@ -27,4 +27,6 @@ bool registry_lookup_dev(dev_t dev);
 
 int registry_update(const char *dev_name, dev_t dev);
 
+void registry_end_session(dev_t dev);
+
 #endif
