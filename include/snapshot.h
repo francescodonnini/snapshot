@@ -5,13 +5,11 @@
 #include <linux/bio.h>
 #include <linux/types.h>
 
-int snapshotfs_init(void);
+int snapshot_init(void);
 
-void snapshotfs_cleanup(void);
+void snapshot_cleanup(void);
 
 int snapshot_create(dev_t dev, const char *session, struct hashset *set);
-
-int snapshot_restore(dev_t dev);
 
 int snapshot_save(struct bio *bio);
 

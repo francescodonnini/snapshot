@@ -7,13 +7,13 @@
 #include <linux/init.h>
 #include <linux/module.h>
 
-static void __exit snapshot_exit(void) {
+static void __exit bsnapshot_exit(void) {
     probes_cleanup();
     chrdev_cleanup();
     registry_cleanup();
     bnull_cleanup();
     bio_deferred_work_cleanup();
-    snapshotfs_cleanup();
+    snapshot_cleanup();
 }
 
-module_exit(snapshot_exit);
+module_exit(bsnapshot_exit);

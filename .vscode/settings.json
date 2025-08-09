@@ -61,7 +61,9 @@
         "namei.h": "c",
         "hashset.h": "c",
         "bnull.h": "c",
-        "bio_utils.h": "c"
+        "bio_utils.h": "c",
+        "restore.h": "c",
+        "errno.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
     "makefile.configureOnOpen": true,

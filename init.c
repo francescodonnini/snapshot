@@ -12,8 +12,8 @@
 #include <linux/printk.h>
 #include <linux/types.h>
 
-static int __init snapshot_init(void) {
-    int err = snapshotfs_init();
+static int __init bsnapshot_init(void) {
+    int err = snapshot_init();
     if (err) {
         goto snapshotfs_init_failed;
     }
@@ -48,7 +48,7 @@ chrdev_failed:
 registry_failed:
     probes_cleanup();
 probes_failed:
-    snapshotfs_cleanup();
+    snapshot_cleanup();
 snapshotfs_init_failed:
     return err;
 }
@@ -57,4 +57,4 @@ MODULE_AUTHOR("Francesco Donnini <donnini.francesco00@gmail.com>");
 MODULE_DESCRIPTION("Block-device snapshot");
 MODULE_LICENSE("GPL");
 
-module_init(snapshot_init);
+module_init(bsnapshot_init);

@@ -18,9 +18,16 @@ static struct kretprobe mount_bdev_kretprobe = {
     .data_size = sizeof(struct mount_bdev_data)
 };
 
+static struct kretprobe umount_kretprobe = {
+    .kp.symbol_name = "path_umount",
+    .entry_handler = path_umount_entry_handler,
+    .handler = path_umount_handler,
+    .data_size = sizeof(struct umount_data)
+};
+
 static struct kretprobe *kretprobe_table[] = {
     &submit_bio_kretprobe,
-    &mount_bdev_kretprobe
+    &mount_bdev_kretprobe,
 };
 static size_t KRETPROBES_NUM = sizeof(kretprobe_table) / sizeof(struct kretprobe *);
 

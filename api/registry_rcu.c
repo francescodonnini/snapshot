@@ -23,7 +23,7 @@ struct registry_entity {
     char                *password;
     char                *session_id;
     dev_t                dev;
-    struct hashset      *set;
+    struct hashset       set;
 };
 
 DEFINE_SPINLOCK(write_lock);
@@ -49,73 +49,29 @@ void registry_cleanup(void) {
     synchronize_rcu();
     struct registry_entity *it, *tmp;
     list_for_each_entry_safe(it, tmp, &old_head, list) {
+        hashset_destroy(it->dev, &it->set);
         kfree(it);
     }
 }
 
-/**
- * mk_node allocates memory for a struct registry_entity and initializes some of its fields:
- * it copies dev_name and the hash of password to the newly allocated memory area, and it stores the hash of dev_name.
- * It returns:
- * 
- * * -ETOOBIG if @param dev_name is too long to represent a valid file path;
- * 
- * * -ENOMEM if kmalloc failed to allocate enough memory to hold struct registry_entity
- * 
- * *  other errors if it was not possibile to compute the cryptographic hash function of password (see 'hash' and 'hash2' for details)
- * 
- * * a pointer to the newly allocated memory area otherwise.
- */
-static struct registry_entity* mk_node(const char *dev_name, const char *password) {
-    int err;
-    size_t n = strnlen(dev_name, PATH_MAX);
-    if (n == PATH_MAX) {
-        err = -ETOOBIG;
-        goto no_node;
-    }
-    size_t total_size = sizeof(struct registry_entity) + (n + 1) + SHA1_HASH_LEN + (UUID_STRING_LEN + 1);
-    struct registry_entity *node = kmalloc(total_size, GFP_KERNEL);
-    if (node == NULL) {
-        err = -ENOMEM;
-        goto no_node;
-    }
-    node->list.prev = NULL;
-    node->list.next = NULL;
-    node->dev_name_hash = fast_hash(dev_name);
-    node->dev_name = (char*) node + sizeof(struct registry_entity);
-    node->password = node->dev_name + (n + 1);
-    err = hash2("sha1", password, strlen(password), node->password, SHA1_HASH_LEN);
-    if (err) {
-        goto free_node;
-    }
-    node->session_id = node->password + SHA1_HASH_LEN;
-    strscpy(node->dev_name, dev_name, n + 1);
-    struct hashset *set = hashset_create();
-    if (IS_ERR(set)) {
-        goto free_node;
-    }
-    node->set = set;
-    return node;
-
-free_node:
-    kfree(node);
-no_node:
-    return ERR_PTR(err);
-}
-
-static struct registry_entity* get_raw(const char *dev_name) {
-    unsigned long h = fast_hash(dev_name);
+static inline bool registry_lookup_rcu(bool(*pred)(struct registry_entity*, void *args), void *args) {
     struct registry_entity *it;
-    list_for_each_entry(it, &registry_db, list) {
-        if (h == it->dev_name_hash && !strcmp(it->dev_name, dev_name)) {
-            return it;
+    bool b = false;
+    rcu_read_lock();
+    list_for_each_entry_rcu(it, &registry_db, list) {
+        b = pred(it, args);
+        if (b) {
+            break;
         }
     }
-    return NULL;
+    rcu_read_unlock();
+    return b;
 }
 
-static inline bool lookup_raw(const char *dev_name) {
-    return get_raw(dev_name) != NULL;
+static inline bool by_dev_name(struct registry_entity *it, void *args) {
+    struct registry_entity *node = (struct registry_entity*)args;
+    return it->dev_name_hash == node->dev_name_hash
+           && !strcmp(it->dev_name, node->dev_name);
 }
 
 /**
@@ -125,11 +81,143 @@ static inline bool lookup_raw(const char *dev_name) {
  * @return 0 if the insertion was sucessfull, -EDUPNAME otherwise
  */
 static int try_add(struct registry_entity *ep) {
-    if (lookup_raw(ep->dev_name)) {
+    if (registry_lookup_rcu(by_dev_name, ep)) {
         return -EDUPNAME;
     }
     list_add_rcu(&ep->list, &registry_db);
     return 0;
+}
+
+/**
+ * mk_node allocates memory for a struct registry_entity and initializes some of its fields:
+ * it copies dev_name and the hash of password to the newly allocated memory area, and it stores the hash of dev_name.
+ * It returns:
+ * * -ETOOBIG if dev_name is too long to represent a valid file path;
+ * * -ENOMEM if kmalloc failed to allocate enough memory to hold struct registry_entity
+ * *  other errors if it was not possibile to compute the cryptographic hash function of password (see 'hash' and 'hash_alloc' for details)
+ * *  a pointer to the newly allocated memory area otherwise.
+ */
+static struct registry_entity* mk_node(const char *dev_name, const char *password) {
+    int err;
+    size_t n = strnlen(dev_name, PATH_MAX);
+    if (n == PATH_MAX) {
+        err = -ETOOBIG;
+        goto no_node;
+    }
+    struct registry_entity *node;
+    size_t size = sizeof(*node);
+    size += ALIGN(n + 1, sizeof(void*));
+    size += ALIGN(SHA1_HASH_LEN, sizeof(void*));
+    size += ALIGN(UUID_STRING_LEN + 1, sizeof(void*));
+    node = kzalloc(size, GFP_KERNEL);
+    if (node == NULL) {
+        err = -ENOMEM;
+        goto no_node;
+    }
+    node->dev_name = (char*)node + sizeof(*node);
+    node->password = node->dev_name + ALIGN(n + 1, sizeof(void*));
+    node->session_id = node->password + ALIGN(SHA1_HASH_LEN, sizeof(void*));
+    err = hash("sha1", password, strlen(password), node->password, SHA1_HASH_LEN);
+    if (err) {
+        goto free_node;
+    }
+    node->dev_name_hash = fast_hash(dev_name);
+    strscpy(node->dev_name, dev_name, n + 1);
+    err = hashset_create(&node->set);
+    if (err) {
+        goto free_node;
+    }
+    return node;
+
+free_node:
+    kfree(node);
+no_node:
+    return ERR_PTR(err);
+}
+
+/**
+ * registry_insert tries to register a device/image file. It returns 0 on success, <0 otherwise.
+ */
+int registry_insert(const char *dev_name, const char *password) {
+    struct registry_entity *node = mk_node(dev_name, password);
+    if (IS_ERR(node)) {
+        return PTR_ERR(node);
+    }
+    unsigned long flags;
+    spin_lock_irqsave(&write_lock, flags);
+    int err = try_add(node);
+    spin_unlock_irqrestore(&write_lock, flags);
+    if (err) {
+        kfree(node);
+    }
+    return err;
+}
+
+/**
+ * check_password computes the hash of password and compares it to pw_hash, that is an already hashed password.
+ * It returns true if the hashes match, false if they don't match or some error occurred while computing the
+ * cryptographic hash of password (see hash/hash2 for further details).
+ */
+static bool check_password(const char *pw_hash, const char *password, char *buffer) {
+    int err = hash("sha1", password, strlen(password), buffer, SHA1_HASH_LEN);
+    if (err) {
+        return false;
+    }
+    return memcmp(pw_hash, buffer, SHA1_HASH_LEN) == 0;
+}
+
+static inline struct registry_entity *get_by_name(const char *name) {
+    unsigned long name_hash = fast_hash(name);
+    struct registry_entity *it;
+    list_for_each_entry_rcu(it, &registry_db, list) {
+        bool b = name_hash == it->dev_name_hash && !strcmp(name, it->dev_name);
+        if (b) {
+            return it;
+        }
+    }
+    return NULL;
+}
+
+/**
+ * registry_delete deletes the credentials associated with the block-device dev_name
+ * @param dev_name the name of the block-device
+ * @param password the password protecting the snapshot
+ * @return -EWRONGCRED if the password or the device name are wrong, 0 otherwise 
+ */
+int registry_delete(const char *dev_name, const char *password) {
+    char *other_pw_buffer = kmalloc(SHA1_HASH_LEN, GFP_KERNEL);
+    if (!other_pw_buffer) {
+        return -ENOMEM;
+    }
+    unsigned long flags;
+    spin_lock_irqsave(&write_lock, flags);
+    struct registry_entity *it = get_by_name(dev_name);
+    int err = -EWRONGCRED;
+    if (it && check_password(it->password, password, other_pw_buffer)) {
+        list_del_rcu(&it->list);
+        err = 0;
+    }
+    spin_unlock_irqrestore(&write_lock, flags);
+    kfree(other_pw_buffer);
+    if (!err && it) {
+        synchronize_rcu();
+        hashset_destroy(it->dev, &it->set);
+        kfree(it);
+    }
+    return err;
+}
+
+static inline bool by_mm(struct registry_entity *it, void *args) {
+    dev_t *dev = (dev_t*)args;
+    return it->dev == *dev;
+}
+
+/**
+ * registry_lookup_mm returns true if there exists a registered entity associated with the device number (dev),
+ * false otherwise.
+ */
+bool registry_lookup_mm(dev_t dev) {
+    return registry_lookup_rcu(by_mm, (void*)&dev);
 }
 
 /**
@@ -142,7 +230,7 @@ static int gen_uuid(char *out, size_t n) {
     uuid_t uuid;
     uuid_gen(&uuid);
     int err = snprintf(out, n, "%pUb", &uuid);
-    if (err != n - 1) {
+    if (err >= n) {
         pr_debug(pr_format("cannot parse uuid"));
         return -1;
     }
@@ -162,105 +250,7 @@ static int update_dev(struct registry_entity *e, dev_t dev) {
     if (err < 0) {
         return -ENOUUID;
     }
-    return snapshot_create(e->dev, e->session_id, e->set);
-}
-
-/**
- * registry_insert tries to register a device/image file. It returns 0 on success, <0 otherwise.
- */
-int registry_insert(const char *dev_name, const char *password) {
-    struct registry_entity *ep = mk_node(dev_name, password);
-    if (IS_ERR(ep)) {
-        return PTR_ERR(ep);
-    }
-    unsigned long flags;
-    spin_lock_irqsave(&write_lock, flags);
-    int err = try_add(ep);
-    spin_unlock_irqrestore(&write_lock, flags);
-    if (err) {
-        kfree(ep);
-    }
-    return err;
-}
-
-/**
- * check_password computes the hash of @param password and compares it to @param pw_hash, that is an already hashed password.
- * It returns true if the hashes match, false if they don't match or some error occurred while computing the
- * cryptographic hash of @param password (see hash/hash2 for further details).
- */
-static bool check_password(const char *pw_hash, const char *password) {
-    char *h = hash("sha1", password, strlen(password));
-    if (IS_ERR(h)) {
-        return false;
-    }
-    bool b = memcmp(pw_hash, h, SHA1_HASH_LEN) == 0;
-    kfree(h);
-    return b;
-}
-
-/**
- * registry_delete deletes the credentials associated with the block-device dev_name
- * @param dev_name the name of the block-device
- * @param password the password protecting the snapshot
- * @return -EWRONGCRED if the password or the device name are wrong, 0 otherwise 
- */
-int registry_delete(const char *dev_name, const char *password) {
-    unsigned long flags;
-    spin_lock_irqsave(&write_lock, flags);
-    struct registry_entity *ep = get_raw(dev_name);
-    int err = -EWRONGCRED;
-    if (ep && check_password(ep->password, password)) {
-        list_del_rcu(&ep->list);
-        err = 0;
-    }
-    spin_unlock_irqrestore(&write_lock, flags);
-    if (!err) {
-        synchronize_rcu();
-        kfree(ep);
-    }
-    return err;
-}
-
-/**
- * registry_check_password checks if a block-device identified by @param dev_name has
- * been registered with the password @param password
- * @param dev_name the name of the block-device
- * @param password the password protecting the snapshot
- * @return false if the passwords does not match or a snapshot with dev_name does not exist, true otherwise.
- */
-bool registry_check_password(const char *dev_name, const char *password) {
-    rcu_read_lock();
-    struct registry_entity *ep = get_raw(dev_name);
-    bool b = !ep && check_password(ep->password, password);
-    rcu_read_unlock();
-    return b;
-}
-
-static inline bool registry_lookup_aux(bool(*pred)(struct registry_entity*, void *args), void *args) {
-    struct registry_entity *it;
-    bool b = false;
-    rcu_read_lock();
-    list_for_each_entry_rcu(it, &registry_db, list) {
-        b = pred(it, args);
-        if (b) {
-            break;
-        }
-    }
-    rcu_read_unlock();
-    return b;
-}
-
-static inline bool by_mm(struct registry_entity *it, void *args) {
-    dev_t *dev = (dev_t*)args;
-    return it->dev == *dev;
-}
-
-/**
- * registry_lookup_mm returns true if there exists a registered entity associated with the device number @param dev,
- * false otherwise.
- */
-bool registry_lookup_mm(dev_t dev) {
-    return registry_lookup_aux(by_mm, (void*)&dev);
+    return snapshot_create(e->dev, e->session_id, &e->set);
 }
 
 /**
@@ -272,13 +262,13 @@ bool registry_lookup_mm(dev_t dev) {
 int registry_update(const char *dev_name, dev_t dev) {
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
-    struct registry_entity *ep = get_raw(dev_name);
+    struct registry_entity *node = get_by_name(dev_name);
     int err = 0;
-    if (!ep) {
+    if (!node) {
         err = -EWRONGCRED;
         goto registry_update_out;
     }
-    err = update_dev(ep, dev);
+    err = update_dev(node, dev);
 registry_update_out:
     spin_unlock_irqrestore(&write_lock, flags);
     return err;

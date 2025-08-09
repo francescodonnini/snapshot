@@ -14,6 +14,7 @@ snapshot-objs := 	api/activate_snapshot.o \
 					ioctl/chrdev.o \
 					kretprobes/kretprobe_handlers.o \
 					kretprobes/mount_bdev.o \
+					kretprobes/path_umount.o \
 					kretprobes/submit_bio.o \
 					exit.o \
 					init.o \

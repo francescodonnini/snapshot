@@ -6,6 +6,7 @@
 #include "registry.h"
 #include <linux/bio.h>
 #include <linux/bvec.h>
+#include <linux/errname.h>
 #include <linux/fs.h>
 #include <linux/namei.h>
 #include <linux/list.h>
@@ -16,35 +17,37 @@
 #define ROOT_DIR "/snapshots"
 
 static int mkdir_snapshots(void) {
-    struct path snapshots_path;
-    int err = kern_path(ROOT_DIR, LOOKUP_DIRECTORY, &snapshots_path);
+    struct path path;
+    int err = kern_path(ROOT_DIR, LOOKUP_DIRECTORY, &path);
     if (!err) {
         pr_debug(pr_format("directory '%s' already exists"), ROOT_DIR);
+        path_put(&path);
         return 0;
-    } else if (err) {
-        pr_debug(pr_format("kern_path failed on '%s', got error %d"), ROOT_DIR, err);
     }
-    struct path root_path;
-    err = kern_path("/", LOOKUP_DIRECTORY, &root_path);
+    struct path parent;
+    err = kern_path("/", LOOKUP_DIRECTORY, &parent);
     if (err) {
-        pr_debug(pr_format("kern_path failed on '/', got error %d"), err);
+        pr_debug(pr_format("kern_path failed on '/', got error %d (%s)"), err, errtoa(err));
         return err;
     }
-    struct dentry *dentry = lookup_one_len("snapshots", root_path.dentry, strlen("snapshots"));
+    struct inode *parent_ino = d_inode(parent.dentry);
+    inode_lock(parent_ino);
+    struct dentry *dentry = lookup_one_len("snapshots", parent.dentry, strlen("snapshots"));
     if (IS_ERR(dentry)) {
         err = PTR_ERR(dentry);
-        pr_debug(pr_format("lookup_one_len failed on 'snapshots', got error %d"), err);
-        goto root_path_put;
+        pr_debug(pr_format("lookup_one_len failed on 'snapshots', got error %d (%s)"), err, errtoa(err));
+        goto parent_put;
     }
-    struct dentry *res = vfs_mkdir(mnt_idmap(root_path.mnt), d_inode(root_path.dentry), dentry, 0660);
+    struct dentry *res = vfs_mkdir(mnt_idmap(parent.mnt), d_inode(parent.dentry), dentry, 0660);
     if (IS_ERR(res)) {
         err = PTR_ERR(res);
-        pr_debug(pr_format("vfs_mkdir failed on '%s', got error %d"), ROOT_DIR, err);
+        pr_debug(pr_format("vfs_mkdir failed on '%s', got error %d (%s)"), ROOT_DIR, err, errtoa(err));
     }
 
     dput(dentry);
-root_path_put:
-    path_put(&root_path);
+parent_put:
+    inode_unlock(parent_ino);
+    path_put(&parent);
     return err;
 }
 
@@ -53,42 +56,42 @@ root_path_put:
  * initializes the necessary data structures used by this subsystem.
  * @returns 0 on success, <0 otherwise
  */
-int snapshotfs_init(void) {
-    pr_debug(pr_format("begin: mkdir_if_not_exists(%s)"), ROOT_DIR);
+int snapshot_init(void) {
     int err = mkdir_snapshots();
     if (err) {
         return err;
     }
-    pr_debug(pr_format("directory %s created successfully"), ROOT_DIR);
     return hashset_pool_init();
 }
 
-void snapshotfs_cleanup(void) {
+void snapshot_cleanup(void) {
     hashset_pool_cleanup();
 }
 
 static int mkdir_session(const char *session) {
-    struct path parent_path;
-    int err = kern_path(ROOT_DIR, LOOKUP_DIRECTORY, &parent_path);
+    struct path parent;
+    int err = kern_path(ROOT_DIR, LOOKUP_DIRECTORY, &parent);
     if (err) {
-        pr_debug(pr_format("'%s' does not exists (error=%d)"), ROOT_DIR, err);
+        pr_debug(pr_format("'%s' does not exists, got error %d (%s)"), ROOT_DIR, err, errtoa(err));
         return err;
     }
-    struct dentry *dentry = lookup_one_len(session, parent_path.dentry, strlen(session));
+    struct inode *parent_ino = d_inode(parent.dentry);
+    inode_lock(parent_ino);
+    struct dentry *dentry = lookup_one_len(session, parent.dentry, strlen(session));
     if (IS_ERR(dentry)) {
         err = PTR_ERR(dentry);
-        pr_debug(pr_format("lookup_one_len failed on '%s', got error %d"), session, err);
-        goto parent_path_put;
+        pr_debug(pr_format("lookup_one_len failed on '%s', got error %d (%s)"), session, err, errtoa(err));
+        goto snapshots_path_put;
     }
-    struct dentry *res = vfs_mkdir(mnt_idmap(parent_path.mnt), d_inode(parent_path.dentry), dentry, 0660);
+    struct dentry *res = vfs_mkdir(mnt_idmap(parent.mnt), d_inode(parent.dentry), dentry, 0660);
     if (IS_ERR(res)) {
         err = PTR_ERR(res);
-        pr_debug(pr_format("vfs_mkdir failed on '%s/%s', got error %d"), ROOT_DIR, session, err);
+        pr_debug(pr_format("vfs_mkdir failed on '%s/%s', got error %d (%s)"), ROOT_DIR, session, err, errtoa(err));
     }
-
     dput(dentry);
-parent_path_put:
-    path_put(&parent_path);
+snapshots_path_put:
+    inode_unlock(parent_ino);
+    path_put(&parent);
     return err;
 }
 

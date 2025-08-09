@@ -16,9 +16,9 @@ int hashset_pool_init(void);
 
 void hashset_pool_cleanup(void);
 
-struct hashset *hashset_create(void);
+int hashset_create(struct hashset *set);
 
-void hashset_destroy(dev_t dev);
+void hashset_destroy(dev_t dev, struct hashset *set);
 
 int hashset_add(dev_t dev, sector_t sector, bool *found);
 

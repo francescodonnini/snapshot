@@ -114,11 +114,10 @@ static struct bio_private_data *mk_private_data(sector_t sector, int nr_pages) {
     pd->block.nr_pages = nr_pages;
     pd->block.sector = sector;
     pd->block.pages = (struct page**)pd + sizeof(struct bio_private_data);
-    pr_debug(pr_format("bio_private_data: nr_pages=%d,sector=%llu"), nr_pages, sector);
     return pd;
 }
 
-static struct bio* __bio_alloc(struct bio *orig_bio) {
+static struct bio* allocate_read_bio(struct bio *orig_bio) {
     struct bio_private_data *private_data = mk_private_data(bio_sector(orig_bio), bio_nr_pages(orig_bio));
     if (!private_data) {
         return NULL;
@@ -136,8 +135,8 @@ static struct bio* __bio_alloc(struct bio *orig_bio) {
     return read_bio;
 }
 
-static struct bio* init_read_bio(struct bio *orig_bio) {
-    struct bio *read_bio = __bio_alloc(orig_bio);
+static struct bio* create_read_bio(struct bio *orig_bio) {
+    struct bio *read_bio = allocate_read_bio(orig_bio);
     if (!read_bio) {
         return NULL;
     }    
@@ -153,7 +152,7 @@ static struct bio* init_read_bio(struct bio *orig_bio) {
 static void process_bio(struct work_struct *work) {
     struct bio_work *w = container_of(work, struct bio_work, work);
     struct bio *orig_bio = w->orig_bio;
-    struct bio *rb = init_read_bio(orig_bio);
+    struct bio *rb = create_read_bio(orig_bio);
     if (!rb) {
         submit_bio(orig_bio);
     } else {
@@ -162,11 +161,14 @@ static void process_bio(struct work_struct *work) {
     kfree(w);
 }
 
+/**
+ * bio_enqueue schedules a (write) bio for deferred work.
+ */
 bool bio_enqueue(struct bio *bio) {
     struct bio_work *w;
     w = kzalloc(sizeof(*w), GFP_KERNEL);
     if (!w) {
-        pr_debug(pr_format("cannot create bio_work struct for device (%d, %d)\n"), MAJOR(bio->bi_bdev->bd_dev), MINOR(bio->bi_bdev->bd_dev));
+        pr_debug(pr_format("cannot create bio_work struct for device (%d, %d)"), MAJOR(bio_devnum(bio)), MINOR(bio_devnum(bio)));
         return false;
     }
     w->orig_bio = bio;
