@@ -6,6 +6,7 @@ snapshot-objs := 	api/activate_snapshot.o \
 					api/path_utils.o \
 					api/registry_rcu.o \
 					api/hashset_rcu.o \
+					api/session.o \
 					api/snapshot.o \
 					bio/bio_enqueue.o \
 					bio/dbg_dump_bio.o \

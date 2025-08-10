@@ -72,14 +72,16 @@ int mount_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     }
     struct mount_bdev_data *data = (struct mount_bdev_data*)kp->data;
     struct block_device *bdev = dentry->d_sb->s_bdev;
-    if (registry_lookup_dev(bdev->bd_dev)) {
+    if (registry_lookup_active(bdev->bd_dev)) {
         dbg_already_registered(data->dev_name, bdev);
         return 0;
     }
+    int err;
     if (is_loop_device(bdev)) {
-        registry_update_loop_device(bdev);
+        err = registry_update_loop_device(bdev);
     } else {
-        registry_update(data->dev_name, bdev->bd_dev);
+        err = registry_update(data->dev_name, bdev->bd_dev);
     }
+    pr_debug(pr_format("cannot update device major=%d,minor=%d, got error %d"), MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev), err);
     return 0;
 }

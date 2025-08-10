@@ -17,7 +17,7 @@ int path_umount_entry_handler(struct kretprobe_instance *kp, struct pt_regs *reg
     struct path *path = get_arg1(struct path*, regs);
     dev_t dev;
     int err = p_dev_safe(path, &dev);
-    if (err || !registry_lookup_dev(dev)) {
+    if (err || !registry_lookup_active(dev)) {
         return -1;
     }
     struct umount_data *data = (struct umount_data*)kp->data;

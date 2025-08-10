@@ -3,6 +3,7 @@
 #include "hash.h"
 #include "hashset.h"
 #include "pr_format.h"
+#include "session.h"
 #include "snapshot.h"
 #include <linux/blkdev.h>
 #include <linux/list.h>
@@ -15,15 +16,19 @@
 
 #define SHA1_HASH_LEN (20)
 
-struct registry_entity {
-    struct list_head     list;
+struct session_current {
+    struct session *ptr;
+};
+
+// All snapshot metadata are stored in a doubly-linked list
+struct snapshot_metadata {
+    struct list_head  list;
     // speed up searches by making string comparisons only on collisions or matches
-    unsigned long        dev_name_hash; 
-    char                *dev_name;
-    char                *password;
-    char                *session_id;
-    dev_t                dev;
-    struct hashset       set;
+    unsigned long           dev_name_hash; 
+    char                   *dev_name;
+    char                   *password;
+    struct session_current  session;
+    struct rcu_head         rcu;
 };
 
 DEFINE_SPINLOCK(write_lock);
@@ -47,15 +52,18 @@ void registry_cleanup(void) {
     list_splice_init(&registry_db, &old_head);
     spin_unlock_irqrestore(&write_lock, flags);
     synchronize_rcu();
-    struct registry_entity *it, *tmp;
+    struct snapshot_metadata *it, *tmp;
     list_for_each_entry_safe(it, tmp, &old_head, list) {
-        hashset_destroy(it->dev, &it->set);
+        struct session *s = it->session.ptr;
+        if (s) {
+            session_destroy(s);
+        }
         kfree(it);
     }
 }
 
-static inline bool registry_lookup_rcu(bool(*pred)(struct registry_entity*, void *args), void *args) {
-    struct registry_entity *it;
+static inline bool registry_lookup_rcu(bool(*pred)(struct snapshot_metadata*, void *args), void *args) {
+    struct snapshot_metadata *it;
     bool b = false;
     rcu_read_lock();
     list_for_each_entry_rcu(it, &registry_db, list) {
@@ -68,19 +76,19 @@ static inline bool registry_lookup_rcu(bool(*pred)(struct registry_entity*, void
     return b;
 }
 
-static inline bool by_dev_name(struct registry_entity *it, void *args) {
-    struct registry_entity *node = (struct registry_entity*)args;
+static inline bool by_dev_name(struct snapshot_metadata *it, void *args) {
+    struct snapshot_metadata *node = (struct snapshot_metadata*)args;
     return it->dev_name_hash == node->dev_name_hash
            && !strcmp(it->dev_name, node->dev_name);
 }
 
 /**
- * try_add adds a registry_entity inside the registry database if another entity
+ * try_add adds a snapshot_metadata inside the registry database if another entity
  * with the same name does not already exist. It assumes that the lock is held.
  * @param ep the entity to be added
  * @return 0 if the insertion was sucessfull, -EDUPNAME otherwise
  */
-static int try_add(struct registry_entity *ep) {
+static int try_add(struct snapshot_metadata *ep) {
     if (registry_lookup_rcu(by_dev_name, ep)) {
         return -EDUPNAME;
     }
@@ -89,44 +97,57 @@ static int try_add(struct registry_entity *ep) {
 }
 
 /**
- * mk_node allocates memory for a struct registry_entity and initializes some of its fields:
+ * total_size returns the size (in number of bytes) required by snapshot metadata. The space required is the number of bytes required by
+ * a struct snapshot_metadata and the space required to store the device name and password hash. Those informations are stored in a contiguos
+ * memory regione to minimize kmalloc invocations.
+ */
+static size_t total_size(size_t n) {
+    return sizeof(struct snapshot_metadata)
+        + ALIGN(n + 1, sizeof(void*))
+        + ALIGN(SHA1_HASH_LEN, sizeof(void*));
+}
+
+/**
+ * helper function that initializes the pointers dev_name and password to the correct addresses.
+ */
+static struct snapshot_metadata *node_alloc(size_t n) {
+    struct snapshot_metadata *node;
+    node = kzalloc(total_size(n), GFP_KERNEL);
+    if (!node) {
+        return NULL;
+    }
+    node->dev_name = (char*)node + sizeof(*node);
+    node->password = node->dev_name + ALIGN(n + 1, sizeof(void*));
+    return node;
+}
+
+/**
+ * mk_node allocates memory for a struct snapshot_metadata and initializes some of its fields:
  * it copies dev_name and the hash of password to the newly allocated memory area, and it stores the hash of dev_name.
  * It returns:
  * * -ETOOBIG if dev_name is too long to represent a valid file path;
- * * -ENOMEM if kmalloc failed to allocate enough memory to hold struct registry_entity
+ * * -ENOMEM if kmalloc failed to allocate enough memory to hold struct snapshot_metadata
  * *  other errors if it was not possibile to compute the cryptographic hash function of password (see 'hash' and 'hash_alloc' for details)
  * *  a pointer to the newly allocated memory area otherwise.
  */
-static struct registry_entity* mk_node(const char *dev_name, const char *password) {
+static struct snapshot_metadata* mk_node(const char *dev_name, const char *password) {
     int err;
     size_t n = strnlen(dev_name, PATH_MAX);
     if (n == PATH_MAX) {
         err = -ETOOBIG;
         goto no_node;
     }
-    struct registry_entity *node;
-    size_t size = sizeof(*node);
-    size += ALIGN(n + 1, sizeof(void*));
-    size += ALIGN(SHA1_HASH_LEN, sizeof(void*));
-    size += ALIGN(UUID_STRING_LEN + 1, sizeof(void*));
-    node = kzalloc(size, GFP_KERNEL);
+    struct snapshot_metadata *node = node_alloc(n);
     if (node == NULL) {
         err = -ENOMEM;
         goto no_node;
     }
-    node->dev_name = (char*)node + sizeof(*node);
-    node->password = node->dev_name + ALIGN(n + 1, sizeof(void*));
-    node->session_id = node->password + ALIGN(SHA1_HASH_LEN, sizeof(void*));
     err = hash("sha1", password, strlen(password), node->password, SHA1_HASH_LEN);
     if (err) {
         goto free_node;
     }
     node->dev_name_hash = fast_hash(dev_name);
     strscpy(node->dev_name, dev_name, n + 1);
-    err = hashset_create(&node->set);
-    if (err) {
-        goto free_node;
-    }
     return node;
 
 free_node:
@@ -139,7 +160,7 @@ no_node:
  * registry_insert tries to register a device/image file. It returns 0 on success, <0 otherwise.
  */
 int registry_insert(const char *dev_name, const char *password) {
-    struct registry_entity *node = mk_node(dev_name, password);
+    struct snapshot_metadata *node = mk_node(dev_name, password);
     if (IS_ERR(node)) {
         return PTR_ERR(node);
     }
@@ -151,6 +172,15 @@ int registry_insert(const char *dev_name, const char *password) {
         kfree(node);
     }
     return err;
+}
+
+static void node_free_rcu(struct rcu_head *head) {
+    struct snapshot_metadata *node = container_of(head, struct snapshot_metadata, rcu);
+    struct session *s = node->session.ptr;
+    if (s) {
+        session_destroy(s);
+    }
+    kfree(node);
 }
 
 /**
@@ -166,9 +196,9 @@ static bool check_password(const char *pw_hash, const char *password, char *buff
     return memcmp(pw_hash, buffer, SHA1_HASH_LEN) == 0;
 }
 
-static inline struct registry_entity *get_by_name(const char *name) {
+static inline struct snapshot_metadata *get_by_name(const char *name) {
     unsigned long name_hash = fast_hash(name);
-    struct registry_entity *it;
+    struct snapshot_metadata *it;
     list_for_each_entry_rcu(it, &registry_db, list) {
         bool b = name_hash == it->dev_name_hash && !strcmp(name, it->dev_name);
         if (b) {
@@ -185,81 +215,40 @@ static inline struct registry_entity *get_by_name(const char *name) {
  * @return -EWRONGCRED if the password or the device name are wrong, 0 otherwise 
  */
 int registry_delete(const char *dev_name, const char *password) {
-    char *other_pw_buffer = kmalloc(SHA1_HASH_LEN, GFP_KERNEL);
-    if (!other_pw_buffer) {
+    char *buffer = kmalloc(SHA1_HASH_LEN, GFP_KERNEL);
+    if (!buffer) {
         return -ENOMEM;
     }
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
-    struct registry_entity *it = get_by_name(dev_name);
+    struct snapshot_metadata *it = get_by_name(dev_name);
     int err = -EWRONGCRED;
-    if (it && check_password(it->password, password, other_pw_buffer)) {
+    if (it && check_password(it->password, password, buffer)) {
         list_del_rcu(&it->list);
         err = 0;
     }
     spin_unlock_irqrestore(&write_lock, flags);
-    kfree(other_pw_buffer);
-    if (!err && it) {
-        synchronize_rcu();
-        hashset_destroy(it->dev, &it->set);
-        kfree(it);
+    kfree(buffer);
+    if (!err) {
+        call_rcu(&it->rcu, node_free_rcu);
     }
     return err;
 }
 
-static inline bool by_mm(struct registry_entity *it, void *args) {
+static inline bool is_active(struct snapshot_metadata *it, void *args) {
     dev_t *dev = (dev_t*)args;
-    return it->dev == *dev;
-}
-
-/**
- * registry_lookup_dev returns true if there exists a registered entity associated with the device number (dev),
- * false otherwise.
- */
-bool registry_lookup_dev(dev_t dev) {
-    return registry_lookup_rcu(by_mm, (void*)&dev);
-}
-
-static inline bool is_active(struct registry_entity *it, void *args) {
-    dev_t *dev = (dev_t*)args;
-    return it->dev == *dev && !it->session_id;
+    struct session *s = it->session.ptr;
+    return s && s->dev == *dev;
 }
 
 bool registry_lookup_active(dev_t dev) {
     return registry_lookup_rcu(is_active, (void*)&dev);
 }
 
-/**
- * gen_uuid generates a unique identifier leveraging the kernel API uuid_*. A uuid identifies
- * a session, that is all the interaction with a block device between the moment it has been mounted and
- * it has been unmounted. It stores the string representation of the id in @param out, a pointer to a char
- * buffer of size @param n. It returns 0 on success or -1 otherwise.
- */
-static int gen_uuid(char *out, size_t n) {
-    uuid_t uuid;
-    uuid_gen(&uuid);
-    int err = snprintf(out, n, "%pUb", &uuid);
-    if (err >= n) {
-        pr_debug(pr_format("cannot parse uuid"));
-        return -1;
-    }
-    return 0;
-}
-
-/**
- * update_dev updates the entity associated with a certain filesystem image with the device number associated to the
- * instance of the filesystem previously mounted. Together with the device number, a unique identifier is generated. The
- * ID is the name of the folder in '/snapshots' where the original blocks of the filesystem are stored. This functions fails if
- * either some error occurred while generating the unique ID or it was not possible to create all the necessary data structured to
- * represent the filesystem snapshot. It returns <0 on failure, 0 otherwise.
- */
-static int update_dev(struct registry_entity *e, dev_t dev) {
-    e->dev = dev;
-    int err = gen_uuid(e->session_id, UUID_STRING_LEN + 1);
-    if (err < 0) {
-        return -ENOUUID;
-    }
-    return snapshot_create(e->dev, e->session_id, &e->set);
+static inline void node_copy(struct snapshot_metadata *dst, struct snapshot_metadata *src) {
+    memcpy(dst->dev_name, src->dev_name, strlen(src->dev_name) + 1);
+    dst->dev_name_hash = src->dev_name_hash;
+    memcpy(dst->password, src->password, SHA1_HASH_LEN);
 }
 
 /**
@@ -269,28 +258,75 @@ static int update_dev(struct registry_entity *e, dev_t dev) {
  * @returns 0 on success, <0 otherwise.
  */
 int registry_update(const char *dev_name, dev_t dev) {
+    struct snapshot_metadata *new_node = node_alloc(strlen(dev_name));
+    if (!new_node) {
+        return -ENOMEM;
+    }
+    int err;
+    struct session *session = session_create(dev);
+    if (!session) {
+        err = -ENOMEM;
+        goto no_session;
+    }
+    err = snapshot_create(session->id);
+    if (err) {
+        goto no_directory;
+    }
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
-    struct registry_entity *node = get_by_name(dev_name);
-    int err = 0;
-    if (!node) {
+    struct snapshot_metadata *old_node = get_by_name(dev_name);
+    if (!old_node) {
         err = -EWRONGCRED;
-        goto registry_update_out;
+        goto wrong_credentials;
     }
-    err = update_dev(node, dev);
-registry_update_out:
+    node_copy(new_node, old_node);
+    new_node->session.ptr = session;
+    list_replace_rcu(&old_node->list, &new_node->list);
     spin_unlock_irqrestore(&write_lock, flags);
+    call_rcu(&old_node->rcu, node_free_rcu);
+    return err;
+
+wrong_credentials:
+    spin_unlock_irqrestore(&write_lock, flags);
+no_directory:
+    session_destroy(session);
+no_session:
+    kfree(new_node);
     return err;
 }
 
-bool registry_get_session(dev_t dev, char *session) {
+int registry_add_sector(dev_t dev, sector_t sector, bool *added) {
+    rcu_read_lock();
+    bool registered = false;
+    struct snapshot_metadata *it;
+    struct session *s = NULL;
+    list_for_each_entry_rcu(it, &registry_db, list) {
+        registered = s && s->dev == dev;
+        if (registered) {
+            break;
+        }
+    }
+    *added = false;
+    int err;
+    if (!registered) {
+        err = -ENOSSN;
+        goto out;
+    }
+    err = hashset_add(&s->hashset, dev, sector, added);
+out:
+    rcu_read_unlock();
+    return err;
+}
+
+bool registry_get_session_id(dev_t dev, char *id) {
     rcu_read_lock();
     bool found = false;
-    struct registry_entity *it;
+    struct snapshot_metadata *it;
     list_for_each_entry_rcu(it, &registry_db, list) {
-        found = it->dev == dev;
+        struct session *s = it->session.ptr;
+        found = s && s->dev == dev;
         if (found) {
-            strncpy(session, it->session_id, UUID_STRING_LEN + 1);
+            strncpy(id, s->id, UUID_STRING_LEN + 1);
             break;
         }
     }
@@ -299,20 +335,35 @@ bool registry_get_session(dev_t dev, char *session) {
 }
 
 void registry_end_session(dev_t dev) {
-    rcu_read_lock();
+    unsigned long flags;
+    spin_lock_irqsave(&write_lock, flags);
     bool found = false;
-    struct registry_entity *it;
+    struct snapshot_metadata *it;
     list_for_each_entry_rcu(it, &registry_db, list) {
-        found = it->dev == dev;
+        struct session *s = it->session.ptr;
+        found = s && s->dev == dev;
         if (found) {
             break;
         }
     }
+    int err = 0;
     if (!found) {
-        goto registry_end_session_out;
+        err = -ENOSSN;
+        goto no_session;
     }
-    *(it->session_id) = 0;
-    hashset_clear(dev, &it->set);
-registry_end_session_out:
-    rcu_read_unlock();
+    struct snapshot_metadata *new_node = node_alloc(strlen(it->dev_name));
+    if (!new_node) {
+        err = -ENOMEM;
+        goto no_session;
+    }
+    node_copy(new_node, it);
+    list_replace_rcu(&it->list, &new_node->list);
+    spin_unlock_irqrestore(&write_lock, flags);
+no_session:
+    spin_unlock_irqrestore(&write_lock, flags);
+    if (err) {
+        kfree(new_node);
+    } else {
+        call_rcu(&it->rcu, node_free_rcu);
+    }
 }

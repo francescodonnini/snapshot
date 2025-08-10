@@ -57,15 +57,10 @@ parent_put:
  * @returns 0 on success, <0 otherwise
  */
 int snapshot_init(void) {
-    int err = mkdir_snapshots();
-    if (err) {
-        return err;
-    }
-    return hashset_pool_init();
+    return mkdir_snapshots();
 }
 
 void snapshot_cleanup(void) {
-    hashset_pool_cleanup();
 }
 
 static int mkdir_session(const char *session) {
@@ -102,12 +97,8 @@ snapshots_path_put:
  *                    command
  * @returns 0 on success, <0 otherwise.
  */
-int snapshot_create(dev_t dev, const char *session, struct hashset *set) {
-    int err = mkdir_session(session);
-    if (err) {
-        return err;
-    }
-    return hashset_register(dev, set);
+int snapshot_create(const char *session) {
+    return mkdir_session(session);
 }
 
 static inline char *h2a(sector_t sector, char *buffer) {
@@ -153,7 +144,7 @@ int snapshot_save(struct bio *bio) {
         return -ENOMEM;
     }
     int err = 0;
-    bool found = registry_get_session(bio_devnum(bio), session);
+    bool found = registry_get_session_id(bio_devnum(bio), session);
     if (!found) {
         pr_debug(pr_format("cannot find session associated with device %d,%d"), MAJOR(bio_devnum(bio)), MINOR(bio_devnum(bio)));
         err = -EWRONGCRED;

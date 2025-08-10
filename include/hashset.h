@@ -10,21 +10,12 @@
 
 struct hashset {
     struct rhashtable ht;
-    struct rcu_head   rcu;
 };
-
-int hashset_pool_init(void);
-
-void hashset_pool_cleanup(void);
 
 int hashset_create(struct hashset *set);
 
-void hashset_destroy(dev_t dev, struct hashset *set);
+void hashset_destroy(struct hashset *set);
 
-int hashset_add(dev_t dev, sector_t sector, bool *found);
-
-int hashset_register(dev_t dev, struct hashset *session);
-
-int hashset_clear(dev_t dev, struct hashset *set);
+int hashset_add(struct hashset *set, dev_t dev, sector_t sector, bool *found);
 
 #endif

@@ -25,16 +25,13 @@ static inline void bio_unmark(struct bio *bio) {
 }
 
 static bool discard_bio(struct bio *bio) {
-    bool found;
-    int err = hashset_add(bio_devnum(bio), bio_sector(bio), &found);
-    if (err) {
+    bool added;
+    int err = registry_add_sector(bio_devnum(bio), bio_sector(bio), &added);
+    if (err && err != -ENOSSN) {
         pr_debug(pr_format("hashset_add completed with error %d"), err);
-        return false;
+        return true;
     }
-    if (found) {
-        pr_debug(pr_format("discarded bio with dev=%d and sector=%llu"), bio_devnum(bio), bio_sector(bio));
-    }
-    return found;
+    return err == -ENOSSN || added;
 }
 
 /**
@@ -89,7 +86,6 @@ int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
     // * the request was sent to a device not registered;
     if (!bio
         || !op_is_write(bio_op(bio))
-        || !registry_lookup_active(bio_devnum(bio))
         || discard_bio(bio)
         || skip_bio(bio)) {
         return 1;

@@ -1,5 +1,6 @@
 #ifndef AOS_REGISTRY_H
 #define AOS_REGISTRY_H
+#include "session.h"
 #include <linux/types.h>
 
 // EDUPNAME    indicates that someone has tried to register a device already registered
@@ -11,19 +12,21 @@
 #define ETOOBIG    5001
 #define EWRONGCRED 5002
 #define ENOUUID    5003
+#define ENOSSN     5004
+
 int registry_init(void);
 
 void registry_cleanup(void);
 
-bool registry_get_session(dev_t dev, char *session);
+int registry_add_sector(dev_t dev, sector_t sector, bool *added);
+
+bool registry_get_session_id(dev_t dev, char *id);
 
 int registry_insert(const char *dev_name, const char *password);
 
 int registry_delete(const char *dev_name, const char *password);
 
 bool registry_lookup_active(dev_t dev);
-
-bool registry_lookup_dev(dev_t dev);
 
 int registry_update(const char *dev_name, dev_t dev);
 
