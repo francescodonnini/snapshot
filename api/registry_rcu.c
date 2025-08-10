@@ -276,11 +276,13 @@ int registry_update(const char *dev_name, dev_t dev) {
     spin_lock_irqsave(&write_lock, flags);
     struct snapshot_metadata *old_node = get_by_name(dev_name);
     if (!old_node) {
+        pr_debug(pr_format("cannot find device=%s"), dev_name);
         err = -EWRONGCRED;
         goto wrong_credentials;
     }
     node_copy(new_node, old_node);
     new_node->session.ptr = session;
+    pr_debug(pr_format("device=%s,uuid=%s"), dev_name, session->id);
     list_replace_rcu(&old_node->list, &new_node->list);
     spin_unlock_irqrestore(&write_lock, flags);
     call_rcu(&old_node->rcu, node_free_rcu);
@@ -358,7 +360,6 @@ void registry_end_session(dev_t dev) {
     }
     node_copy(new_node, it);
     list_replace_rcu(&it->list, &new_node->list);
-    spin_unlock_irqrestore(&write_lock, flags);
 no_session:
     spin_unlock_irqrestore(&write_lock, flags);
     if (err) {

@@ -16,6 +16,6 @@ int hashset_create(struct hashset *set);
 
 void hashset_destroy(struct hashset *set);
 
-int hashset_add(struct hashset *set, dev_t dev, sector_t sector, bool *found);
+int hashset_add(struct hashset *set, dev_t dev, sector_t sector, bool *added);
 
 #endif

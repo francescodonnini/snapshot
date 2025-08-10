@@ -31,7 +31,14 @@ static bool discard_bio(struct bio *bio) {
         pr_debug(pr_format("hashset_add completed with error %d"), err);
         return true;
     }
-    return err == -ENOSSN || added;
+    if (!err) {
+        if (added) {
+            pr_debug(pr_format("bio: dev=%d,%d, sector=%llu already exists"), MAJOR(bio_devnum(bio)), MINOR(bio_devnum(bio)), bio_sector(bio));
+        } else {
+            pr_debug(pr_format("bio: dev=%d,%d, sector=%llu added to block table"), MAJOR(bio_devnum(bio)), MINOR(bio_devnum(bio)), bio_sector(bio));
+        }
+    }
+    return err == -ENOSSN || !added;
 }
 
 /**

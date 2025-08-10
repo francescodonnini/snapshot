@@ -19,7 +19,7 @@ static const struct rhashtable_params sector_set_params = {
 int hashset_create(struct hashset *set) {
     int err = rhashtable_init(&set->ht, &sector_set_params);
     if (err) {
-        pr_debug(pr_format("cannot allocate secondary hashtable, got error %d"), err);
+        pr_debug(pr_format("cannot initialize block hashtable, got error %d"), err);
     }
     return err;
 }
@@ -48,17 +48,19 @@ static inline struct sector_obj *mk_sector_obj(sector_t sector) {
  * error occurred during the insertion of the sector in the hashtable (see rhashtable_lookup_insert_fast() for
  * further details).
  */
-int hashset_add(struct hashset *set, dev_t dev, sector_t sector, bool *found) {
+int hashset_add(struct hashset *set, dev_t dev, sector_t sector, bool *added) {
     struct sector_obj *obj = mk_sector_obj(sector);
     if (!obj) {
         return -ENOMEM;
     }
+    pr_debug(pr_format("add item ([%d,%d],%llu) to block table"), MAJOR(dev), MINOR(dev), sector);
     int err = rhashtable_lookup_insert_fast(&set->ht, &obj->linkage, sector_set_params);
-    if (err == -EEXIST) {
-        err = 0;
-        *found = true;
-    } else if (!err) {
-        *found = false;
+    *added = err == 0;
+    err = err == -EEXIST ? 0 : err;
+    if (err) {
+        pr_debug(
+            pr_format("cannot insert item ([%d,%d],%llu) to block table, got error %d (%s)"),
+            MAJOR(dev), MINOR(dev), sector, err, errtoa(err));
     }
     rcu_read_unlock();
     return err;

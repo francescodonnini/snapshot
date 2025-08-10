@@ -26,6 +26,7 @@ ccflags-y += -I$(src)/include
 
 CFLAGS_api/hashset_rcu.o += -DDEBUG
 CFLAGS_api/registry_rcu.o += -DDEBUG
+CFLAGS_api/session.o += -DDEBUG
 CFLAGS_api/snapshot.o += -DDEBUG
 CFLAGS_bio/bio_enqueue.o += -DDEBUG
 CFLAGS_kretprobes/submit_bio.o += -DDEBUG

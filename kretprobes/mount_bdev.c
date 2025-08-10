@@ -54,7 +54,7 @@ static int registry_update_loop_device(struct block_device *bdev) {
 }
 
 static inline void dbg_already_registered(const char *dev_name, struct block_device *bdev) {
-    pr_debug(pr_format("device %s associated to device number (%d, %d) is already registered"),
+    pr_debug(pr_format("device %s associated to device number (%d, %d) does not exist or is already registered"),
              dev_name, MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev));
 }
 
@@ -82,6 +82,8 @@ int mount_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     } else {
         err = registry_update(data->dev_name, bdev->bd_dev);
     }
-    pr_debug(pr_format("cannot update device major=%d,minor=%d, got error %d"), MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev), err);
+    if (err) {
+        pr_debug(pr_format("cannot update device major=%d,minor=%d, got error %d"), MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev), err);
+    }
     return 0;
 }
