@@ -1,7 +1,7 @@
 #include "kretprobe_handlers.h"
-#include "loop_utils.h"
 #include "pr_format.h"
 #include "registry.h"
+#include "update_session.h"
 #include <linux/blk-mq.h>
 #include <linux/blk_types.h>
 #include <linux/blkdev.h>
@@ -10,10 +10,6 @@
 #include <linux/loop.h>
 #include <linux/major.h>
 #include <linux/printk.h>
-
-static inline struct file_system_type* get_file_system_type(struct pt_regs *regs) {
-    return get_arg1(struct file_system_type*, regs);
-}
 
 static inline char* get_dev_name(struct pt_regs *regs) {
     return get_arg3(char*, regs);
@@ -25,32 +21,6 @@ int mount_bdev_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
     struct mount_bdev_data *data = (struct mount_bdev_data*)kp->data;
     data->dev_name = get_dev_name(regs);
     return 0;
-}
-
-static inline int try_update_loop_dev(struct block_device *bdev, char *buf) {
-    const char *ip = backing_loop_device_file(bdev, buf);    
-    if (IS_ERR(ip)) {
-        return PTR_ERR(ip);
-    } else {
-        return registry_update(ip, bdev->bd_dev);
-    }
-}
-
-/**
- * registry_update_loop_device gets the path of the file backing the loop device and
- * updates the registry with the device number associated to the image.
- * Returns 0 on success, < 0 otherwise. Possible errors are -ENOMEM if it is not possible to make
- * enough space to hold the path of the image file or if the update operation to the registry fails
- * (see registry_update for more details).
- */
-static int registry_update_loop_device(struct block_device *bdev) {
-    char *buf = kmalloc(PATH_MAX, GFP_KERNEL);
-    if (!buf) {
-        return -ENOMEM;
-    }
-    int err = try_update_loop_dev(bdev, buf);
-    kfree(buf);
-    return err;
 }
 
 static inline void dbg_already_registered(const char *dev_name, struct block_device *bdev) {
@@ -76,14 +46,6 @@ int mount_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
         dbg_already_registered(data->dev_name, bdev);
         return 0;
     }
-    int err;
-    if (is_loop_device(bdev)) {
-        err = registry_update_loop_device(bdev);
-    } else {
-        err = registry_update(data->dev_name, bdev->bd_dev);
-    }
-    if (err) {
-        pr_debug(pr_format("cannot update device major=%d,minor=%d, got error %d"), MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev), err);
-    }
+    update_session(data->dev_name, bdev);
     return 0;
 }

@@ -32,7 +32,7 @@ static bool discard_bio(struct bio *bio) {
         return true;
     }
     if (!err) {
-        if (added) {
+        if (!added) {
             pr_debug(pr_format("bio: dev=%d,%d, sector=%llu already exists"), MAJOR(bio_devnum(bio)), MINOR(bio_devnum(bio)), bio_sector(bio));
         } else {
             pr_debug(pr_format("bio: dev=%d,%d, sector=%llu added to block table"), MAJOR(bio_devnum(bio)), MINOR(bio_devnum(bio)), bio_sector(bio));
@@ -93,8 +93,8 @@ int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
     // * the request was sent to a device not registered;
     if (!bio
         || !op_is_write(bio_op(bio))
-        || discard_bio(bio)
-        || skip_bio(bio)) {
+        || skip_bio(bio)
+        || discard_bio(bio)) {
         return 1;
     }
     struct bio *dummy_bio = create_dummy_bio(bio);

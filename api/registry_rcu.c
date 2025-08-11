@@ -62,7 +62,7 @@ void registry_cleanup(void) {
     }
 }
 
-static inline bool registry_lookup_rcu(bool(*pred)(struct snapshot_metadata*, void *args), void *args) {
+static inline bool registry_lookup_rcu(bool(*pred)(struct snapshot_metadata*, const void *args), const void *args) {
     struct snapshot_metadata *it;
     bool b = false;
     rcu_read_lock();
@@ -76,7 +76,7 @@ static inline bool registry_lookup_rcu(bool(*pred)(struct snapshot_metadata*, vo
     return b;
 }
 
-static inline bool by_dev_name(struct snapshot_metadata *it, void *args) {
+static inline bool by_dev_name(struct snapshot_metadata *it, const void *args) {
     struct snapshot_metadata *node = (struct snapshot_metadata*)args;
     return it->dev_name_hash == node->dev_name_hash
            && !strcmp(it->dev_name, node->dev_name);
@@ -235,7 +235,7 @@ int registry_delete(const char *dev_name, const char *password) {
     return err;
 }
 
-static inline bool is_active(struct snapshot_metadata *it, void *args) {
+static inline bool is_active(struct snapshot_metadata *it, const void *args) {
     dev_t *dev = (dev_t*)args;
     struct session *s = it->session.ptr;
     return s && s->dev == *dev;
@@ -282,7 +282,8 @@ int registry_update(const char *dev_name, dev_t dev) {
     }
     node_copy(new_node, old_node);
     new_node->session.ptr = session;
-    pr_debug(pr_format("device=%s,uuid=%s"), dev_name, session->id);
+    pr_debug(pr_format("device=%s;dev=%d,%d;uuid=%s"),
+    dev_name, MAJOR(session->dev), MINOR(session->dev), session->id);
     list_replace_rcu(&old_node->list, &new_node->list);
     spin_unlock_irqrestore(&write_lock, flags);
     call_rcu(&old_node->rcu, node_free_rcu);
@@ -303,6 +304,7 @@ int registry_add_sector(dev_t dev, sector_t sector, bool *added) {
     struct snapshot_metadata *it;
     struct session *s = NULL;
     list_for_each_entry_rcu(it, &registry_db, list) {
+        s = it->session.ptr;
         registered = s && s->dev == dev;
         if (registered) {
             break;

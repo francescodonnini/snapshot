@@ -15,8 +15,10 @@ snapshot-objs := 	api/activate_snapshot.o \
 					ioctl/chrdev.o \
 					kretprobes/kretprobe_handlers.o \
 					kretprobes/mount_bdev.o \
+					kretprobes/get_tree.o \
 					kretprobes/path_umount.o \
 					kretprobes/submit_bio.o \
+					kretprobes/update_session.o \
 					exit.o \
 					init.o \
 
@@ -31,8 +33,12 @@ CFLAGS_api/snapshot.o += -DDEBUG
 CFLAGS_bio/bio_enqueue.o += -DDEBUG
 CFLAGS_kretprobes/submit_bio.o += -DDEBUG
 CFLAGS_bio/dbg_dump_bio.o += -DDEBUG
+CFLAGS_kretprobes/kretprobe_handlers.o += -DDEBUG
 CFLAGS_kretprobes/mount_bdev.o += -DDEBUG
+CFLAGS_kretprobes/get_tree.o += -DDEBUG
 CFLAGS_kretprobes/path_umount.o += -DDEBUG
+CFLAGS_kretprobes/update_session.o += -DDEBUG
+CFLAGS_bnull/bnull.o += -DDEBUG
 
 all: 
 		make -C /lib/modules/$(shell uname -r)/build M=$(PWD)  modules 

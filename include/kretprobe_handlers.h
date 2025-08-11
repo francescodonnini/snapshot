@@ -1,5 +1,6 @@
 #ifndef KPROBE_HANDLERS
 #define KPROBE_HANDLERS
+#include <linux/fs_context.h>
 #include <linux/kprobes.h>
 
 static inline long __get_arg1(struct pt_regs *regs) {
@@ -94,6 +95,10 @@ struct umount_data {
     dev_t dev;
 };
 
+struct get_tree_data {
+    struct fs_context *fc;
+};
+
 int mount_bdev_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 
 int mount_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
@@ -103,5 +108,9 @@ int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
 int path_umount_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 
 int path_umount_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
+
+int get_tree_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
+
+int get_tree_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 
 #endif

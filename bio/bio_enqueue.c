@@ -152,6 +152,7 @@ static struct bio* create_read_bio(struct bio *orig_bio) {
 static void process_bio(struct work_struct *work) {
     struct bio_work *w = container_of(work, struct bio_work, work);
     struct bio *orig_bio = w->orig_bio;
+    dbg_dump_bio("process bio:", orig_bio);
     struct bio *rb = create_read_bio(orig_bio);
     if (!rb) {
         submit_bio(orig_bio);
