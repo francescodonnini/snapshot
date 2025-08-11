@@ -101,11 +101,6 @@ int snapshot_create(const char *session) {
     return mkdir_session(session);
 }
 
-static inline char *h2a(sector_t sector, char *buffer) {
-    sprintf(buffer, "%llx", sector);
-    return buffer;
-}
-
 static void save_page(const char *path, struct page *page) {
     struct file *fp = filp_open(path, O_CREAT | O_WRONLY, 0600);
     if (IS_ERR(fp)) {
@@ -125,20 +120,24 @@ static void save_page(const char *path, struct page *page) {
     }
 }
 
+static inline char *ltoa(sector_t sector, char *buffer) {
+    sprintf(buffer, "%lld", sector);
+    return buffer;
+}
+
 static void save_bio(char *path, struct bio *bio, const char *parent) {
-    dbg_dump_bio("save_bio\n", bio);
     struct bio_private_data *priv = bio->bi_private;
     char octet[OCTET_SZ + 1] = {0};
     sector_t sector = priv->block.sector;
     for (int i = 0; i < priv->block.nr_pages; ++i) {
-        path_join(parent, h2a(sector, octet), path);
+        path_join(parent, ltoa(sector, octet), path);
         save_page(path, priv->block.pages[i]);
         sector += PAGE_SIZE;
     }
 }
 
 int snapshot_save(struct bio *bio) {
-    char *session = kmalloc(UUID_STRING_LEN + 1, GFP_KERNEL);
+    char *session = kzalloc(UUID_STRING_LEN + 1, GFP_KERNEL);
     if (!session) {
         pr_debug(pr_format("cannot make enough space to hold session id"));
         return -ENOMEM;
