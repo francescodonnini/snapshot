@@ -40,16 +40,38 @@ static void dbg_dump_bio_content(struct bio *bio) {
     }
 }
 
-static void dbg_dump_read_bio(struct bio *bio) {
-    dbg_dump_bio("read_original_block_end_io:\n", bio);
-    dbg_dump_bio_content(bio);
+static inline bool bio_status_ok(struct bio *bio) {
+    return bio->bi_status == BLK_STS_OK;
 }
 
+static void dbg_dump_read_bio(struct bio *bio) {
+    dbg_dump_bio("read bio completed\n", bio);
+    if (bio_status_ok(bio)) {
+        dbg_dump_bio_content(bio);
+    }
+}
+
+/**
+ * read_original_block_end_io saves current bio to file and submit original write bio to
+ * block IO layer
+ */
 static void read_original_block_end_io(struct bio *bio) {
     dbg_dump_read_bio(bio);
-    snapshot_save(bio);
+    if (bio_status_ok(bio)) {
+        snapshot_save(bio);
+    } else {
+        pr_debug(pr_format("bio completed with error %d"), bio->bi_status);
+    }
     struct bio_private_data *priv = bio->bi_private;
     submit_bio(priv->orig_bio);
+}
+
+static inline void free_bio_pages(struct bio *bio) {
+    struct bio_vec bv;
+    struct bvec_iter iter;
+    bio_for_each_bvec(bv, bio, iter) {
+        __free_page(bv.bv_page);
+    }
 }
 
 static inline int bio_block_add_page(struct bio *bio, int i, struct page *page) {
@@ -62,34 +84,24 @@ static inline int bio_block_add_page(struct bio *bio, int i, struct page *page) 
     return 0;
 }
 
-static inline int add_page(struct bio *bio, int i, struct page *page) {
+static inline int add_page(struct bio *bio, int i) {
+    struct page *page = alloc_page(GFP_KERNEL);
+    if (!page) {
+        return -ENOMEM;
+    }
     int err = bio_add_page(bio, page, PAGE_SIZE, 0);
     if (err < PAGE_SIZE) {
+        __free_page(page);
         return -1;
     }
     return bio_block_add_page(bio, i, page);
 }
 
-static inline void free_bio_pages(struct bio *bio) {
-    struct bio_vec bv;
-    struct bvec_iter iter;
-    bio_for_each_bvec(bv, bio, iter) {
-        __free_page(bv.bv_page);
-    }
-}
-
 static int allocate_pages(struct bio *bio, int nr_pages) {
     int err = 0;
     for (int i = 0; i < nr_pages; ++i) {
-        struct page *page = alloc_page(GFP_KERNEL);
-        if (!page) {
-            err = -ENOMEM;
-            goto allocate_pages_out;
-        }
-        pr_debug(pr_format("add_page(bio, %d, page)"), i);
-        err = add_page(bio, i, page);
+        int err = add_page(bio, i);
         if (err) {
-            __free_page(page);
             goto allocate_pages_out;
         }
     }
@@ -152,7 +164,7 @@ static struct bio* create_read_bio(struct bio *orig_bio) {
 static void process_bio(struct work_struct *work) {
     struct bio_work *w = container_of(work, struct bio_work, work);
     struct bio *orig_bio = w->orig_bio;
-    dbg_dump_bio("process bio:", orig_bio);
+    dbg_dump_bio("processing bio:", orig_bio);
     struct bio *rb = create_read_bio(orig_bio);
     if (!rb) {
         submit_bio(orig_bio);

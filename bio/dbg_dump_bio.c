@@ -29,11 +29,37 @@ static inline const char *bool_str(bool b) {
     return b ? "true" : "false";
 }
 
+static const char *bio_status_str(struct bio *bio) {
+    switch (bio->bi_status) {
+    case BLK_STS_OK:                   return "BLK_STS_OK";
+    case BLK_STS_NOTSUPP:              return "BLK_STS_NOTSUPP";
+    case BLK_STS_TIMEOUT:              return "BLK_STS_TIMEOUT";
+    case BLK_STS_NOSPC:                return "BLK_STS_NOSPC";
+    case BLK_STS_TRANSPORT:            return "BLK_STS_TRANSPORT";
+    case BLK_STS_TARGET:               return "BLK_STS_TARGET";
+    case BLK_STS_RESV_CONFLICT:        return "BLK_STS_RESV_CONFLICT";
+    case BLK_STS_MEDIUM:               return "BLK_STS_MEDIUM";
+    case BLK_STS_PROTECTION:           return "BLK_STS_PROTECTION";
+    case BLK_STS_RESOURCE:             return "BLK_STS_RESOURCE";
+    case BLK_STS_IOERR:                return "BLK_STS_IOERR";
+    case BLK_STS_DM_REQUEUE:           return "BLK_STS_DM_REQUEUE";
+    case BLK_STS_AGAIN:                return "BLK_STS_AGAIN";
+    case BLK_STS_DEV_RESOURCE:         return "BLK_STS_DEV_RESOURCE";
+    case BLK_STS_ZONE_OPEN_RESOURCE:   return "BLK_STS_ZONE_OPEN_RESOURCE";
+    case BLK_STS_ZONE_ACTIVE_RESOURCE: return "BLK_STS_ZONE_ACTIVE_RESOURCE";
+    case BLK_STS_OFFLINE:              return "BLK_STS_OFFLINE";
+    case BLK_STS_DURATION_LIMIT:       return "BLK_STS_DURATION_LIMIT";
+    case BLK_STS_INVAL:                return "BLK_STS_INVAL";
+    default:                           return "UNKNOWN_BLK_STATUS";
+    }
+}
+
 void dbg_dump_bio(const char *prefix, struct bio *bio) {
     pr_debug(
         pr_format(
             "%s"
             "address             =%p\n"
+            "status              =%s\n"
             "bdev:\n"
             "    maj,min         =(%d,%d)\n"
             "    start_sec,sec_no=%llu,%llu\n"
@@ -47,6 +73,7 @@ void dbg_dump_bio(const char *prefix, struct bio *bio) {
             "iter::size=%u\n"),
         prefix,
         bio,
+        bio_status_str(bio),
         MAJOR(bio->bi_bdev->bd_dev), MINOR(bio->bi_bdev->bd_dev),
         bio->bi_bdev->bd_start_sect, bio->bi_bdev->bd_nr_sectors,
         bool_str(bio->bi_next != NULL),
