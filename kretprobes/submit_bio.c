@@ -8,51 +8,8 @@
 #include <linux/bio.h>
 #include <linux/types.h>
 
-// The last bit of the bitmap struct bio::bi_flags is not currently used
-// by the bio layer so we can use it freely
-#define BIO_BITMASK (0x8000)
-
 static void dummy_end_io(struct bio *bio) {
     bio_put(bio);
-}
-
-static inline void bio_mark(struct bio *bio) {
-    bio->bi_flags |= BIO_BITMASK;
-}
-
-static inline void bio_unmark(struct bio *bio) {
-    bio->bi_flags &= ~BIO_BITMASK;
-}
-
-static bool discard_bio(struct bio *bio) {
-    bool added;
-    int err = registry_add_sector(bio_devnum(bio), bio_sector(bio), &added);
-    if (err && err != -ENOSSN) {
-        pr_debug(pr_format("hashset_add completed with error %d"), err);
-        return true;
-    }
-    if (!err) {
-        if (!added) {
-            pr_debug(pr_format("bio: dev=%d,%d, sector=%llu already exists"), MAJOR(bio_devnum(bio)), MINOR(bio_devnum(bio)), bio_sector(bio));
-        } else {
-            pr_debug(pr_format("bio: dev=%d,%d, sector=%llu added to block table"), MAJOR(bio_devnum(bio)), MINOR(bio_devnum(bio)), bio_sector(bio));
-        }
-    }
-    return err == -ENOSSN || !added;
-}
-
-/**
- * skip_bio returns true if the bio has been already intercepted (and scheduled for further processing)
- * by the kretprobe, false otherwise. When skip_bio detects that the bio request has been alread seen by the
- * kretprobe it resets the flag (and returns true).
- */
-static bool skip_bio(struct bio *bio) {
-    // b is true if the bio was previously marked (intercepted by the kretprobe)
-    bool b = bio->bi_flags & BIO_BITMASK;
-    if (b) {
-        bio_unmark(bio);
-    }
-    return b;
 }
 
 static void init_dummy_bio(struct bio *bio) {
@@ -67,6 +24,35 @@ static struct bio *create_dummy_bio(struct bio *orig_bio) {
     }
     init_dummy_bio(dummy);
     return dummy;
+}
+
+/**
+ * skip_handler returns true if the submit_bio entry handler shouldn't execute, that is a bio:
+ * 1. is null or is not a write bio;
+ * 2. has been already intercepted by the kretprobe. A bio request could be intercepted twice if it is attempting to write a block that has been never
+ *    written before;
+ * 3. is attempting to write to a block whose snapshot has been already saved in /snapshots.
+ *    skip_handler always returns true in case of errors, if the hashset_* API(s) are misbeheaving, then executing the submit_bio handler could lead to catastrophic
+ *    results.
+ */
+static bool skip_handler(struct bio *bio) {
+    if (!bio || !op_is_write(bio->bi_opf)) {
+        return true;
+    }
+    bool added;
+    int err = registry_add_sector(bio_devnum(bio), bio_sector(bio), &added);
+    if (err) {
+        if (err != -ENOSSN) {
+            pr_debug(pr_format("hashset_add completed with error %d"), err);
+        }
+        return true;
+    }
+    if (!added) {
+        pr_debug(pr_format("bio: dev=%d,%d, sector=%llu already exists"), MAJOR(bio_devnum(bio)), MINOR(bio_devnum(bio)), bio_sector(bio));
+    } else {
+        pr_debug(pr_format("bio: dev=%d,%d, sector=%llu added to block table"), MAJOR(bio_devnum(bio)), MINOR(bio_devnum(bio)), bio_sector(bio));
+    }
+    return !added;
 }
 
 /**
@@ -91,10 +77,7 @@ int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
     // * the request is NULL
     // * the request is not for writing;
     // * the request was sent to a device not registered;
-    if (!bio
-        || !op_is_write(bio_op(bio))
-        || skip_bio(bio)
-        || discard_bio(bio)) {
+    if (skip_handler(bio)) {
         return 1;
     }
     struct bio *dummy_bio = create_dummy_bio(bio);
@@ -105,8 +88,6 @@ int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
         pr_debug(pr_format("cannot enqueue bio for device (%d, %d)\n"), MAJOR(bio_devnum(bio)), MINOR(bio_devnum(bio)));
         return 1;
     }
-    // if we made this far, it means that the kretprobe handler hasn't already seen the bio request
-    bio_mark(bio);
     set_arg1(regs, (unsigned long)dummy_bio);
     return 0;
 }

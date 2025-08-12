@@ -64,6 +64,8 @@ static void read_original_block_end_io(struct bio *bio) {
     }
     struct bio_private_data *priv = bio->bi_private;
     submit_bio(priv->orig_bio);
+    kfree(priv);
+    bio_put(bio);
 }
 
 static inline void free_bio_pages(struct bio *bio) {
@@ -117,16 +119,17 @@ static inline unsigned int bio_nr_pages(struct bio *bio) {
 }
 
 static struct bio_private_data *mk_private_data(sector_t sector, int nr_pages) {
-    size_t size = sizeof(struct bio_private_data) + sizeof(struct page*) * nr_pages;
-    struct bio_private_data *pd = kmalloc(size, GFP_KERNEL);
-    if (!pd) {
+    struct bio_private_data *data;
+    size_t size = sizeof(*data) + sizeof(struct page*) * nr_pages;
+    data = kmalloc(size, GFP_KERNEL);
+    if (!data) {
         pr_debug(pr_format("cannot allocate enough memory for struct bio_private_data(%d)"), nr_pages);
         return NULL;
     }
-    pd->block.nr_pages = nr_pages;
-    pd->block.sector = sector;
-    pd->block.pages = (struct page**)pd + sizeof(struct bio_private_data);
-    return pd;
+    data->block.nr_pages = nr_pages;
+    data->block.sector = sector;
+    data->block.pages = (struct page**)data + sizeof(*data);
+    return data;
 }
 
 static struct bio* allocate_read_bio(struct bio *orig_bio) {
@@ -164,7 +167,7 @@ static struct bio* create_read_bio(struct bio *orig_bio) {
 static void process_bio(struct work_struct *work) {
     struct bio_work *w = container_of(work, struct bio_work, work);
     struct bio *orig_bio = w->orig_bio;
-    dbg_dump_bio("processing bio:", orig_bio);
+    dbg_dump_bio("processing bio:\n", orig_bio);
     struct bio *rb = create_read_bio(orig_bio);
     if (!rb) {
         submit_bio(orig_bio);

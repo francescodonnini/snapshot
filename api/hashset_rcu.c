@@ -54,13 +54,9 @@ int hashset_add(struct hashset *set, dev_t dev, sector_t sector, bool *added) {
         return -ENOMEM;
     }
     rcu_read_lock();
-    pr_debug(pr_format("add item ([%d,%d],%llu) to block table"), MAJOR(dev), MINOR(dev), sector);
     int err = rhashtable_lookup_insert_fast(&set->ht, &obj->linkage, sector_set_params);
     *added = err == 0;
     if (err) {
-        pr_debug(
-            pr_format("cannot insert item ([%d,%d],%llu) to block table, got error %d (%s)"),
-            MAJOR(dev), MINOR(dev), sector, err, errtoa(err));
         err = err == -EEXIST ? 0 : err;
         kfree(obj);
     }

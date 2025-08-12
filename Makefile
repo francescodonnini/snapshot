@@ -51,11 +51,3 @@ rm:
 
 clean: 
 		make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
-
-test_start:
-		insmod snapshot.ko
-		sh test/activate.sh /dev/loop0 1234
-
-test_end:
-		sh test/deactivate.sh /dev/loop0 1234
-		rmmod snapshot

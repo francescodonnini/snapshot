@@ -12,9 +12,18 @@
 #include <linux/list.h>
 #include <linux/path.h>
 #include <linux/printk.h>
+#include <linux/workqueue.h>
 
 #define OCTET_SZ (16)
 #define ROOT_DIR "/snapshots"
+
+struct save_work {
+    struct work_struct  work;
+    const char         *path;
+    struct page        *page;
+};
+
+static struct workqueue_struct *queue;
 
 static int mkdir_snapshots(void) {
     struct path path;
@@ -57,10 +66,21 @@ parent_put:
  * @returns 0 on success, <0 otherwise
  */
 int snapshot_init(void) {
-    return mkdir_snapshots();
+    queue = create_workqueue("save_files_wq");
+    if (!queue) {
+        pr_debug(pr_format("cannot create workqueue to save file(s)"));
+        return -ENOMEM;
+    }
+    int err = mkdir_snapshots();
+    if (err) {
+        destroy_workqueue(queue);
+    }
+    return err;
 }
 
 void snapshot_cleanup(void) {
+    flush_workqueue(queue);
+    destroy_workqueue(queue);
 }
 
 static int mkdir_session(const char *session) {
@@ -101,11 +121,14 @@ int snapshot_create(const char *session) {
     return mkdir_session(session);
 }
 
-static void save_page(const char *path, struct page *page) {
+static void save_page(struct work_struct *work) {
+    struct save_work *w = container_of(work, struct save_work, work);
+    const char *path = w->path;
+    struct page *page = w->page;
     struct file *fp = filp_open(path, O_CREAT | O_WRONLY, 0600);
     if (IS_ERR(fp)) {
         pr_debug(pr_format("cannot open file: '%s', got error %ld"), path, PTR_ERR(fp));
-        return;
+        goto save_page_out;
     }
     loff_t off;
     void *va = kmap_local_page(page);
@@ -118,6 +141,22 @@ static void save_page(const char *path, struct page *page) {
     if (err) {
         pr_debug(pr_format("filp_close failed to close file at '%s', got error %d"), path, err);
     }
+save_page_out:
+    kfree(work);
+    kfree(path);
+    __free_page(page);
+}
+
+static int add_work(const char *path, struct page *page) {
+    struct save_work *w;
+    w = kzalloc(sizeof(*w), GFP_KERNEL);
+    if (!w) {
+        return -ENOMEM;
+    }
+    w->path = path;
+    w->page = page;
+    INIT_WORK(&w->work, save_page);
+    return queue_work(queue, &w->work);
 }
 
 static inline char *ltoa(sector_t sector, char *buffer) {
@@ -125,14 +164,24 @@ static inline char *ltoa(sector_t sector, char *buffer) {
     return buffer;
 }
 
-static void save_bio(char *path, struct bio *bio, const char *parent) {
-    struct bio_private_data *priv = bio->bi_private;
+static void save_bio(struct bio_private_data *priv, const char *parent) {
     char octet[OCTET_SZ + 1] = {0};
     sector_t sector = priv->block.sector;
-    for (int i = 0; i < priv->block.nr_pages; ++i) {
+    for (int i = 0; i < priv->block.nr_pages; ++i, sector += PAGE_SIZE) {
+        struct page *page = priv->block.pages[i];
+        char *path = kzalloc(strlen(parent) + OCTET_SZ + 2, GFP_KERNEL);
+        if (!path) {
+            pr_debug(pr_format("cannot allocate enough space for path"));
+            __free_page(page);
+            continue;
+        }
         path_join(parent, ltoa(sector, octet), path);
-        save_page(path, priv->block.pages[i]);
-        sector += PAGE_SIZE;
+        int err = add_work(path, page);
+        if (err == -ENOMEM) {
+            pr_debug(pr_format("add_work failed for file='%s', sector=%llu"), path, sector);
+            __free_page(page);
+            kfree(path);
+        }
     }
 }
 
@@ -154,14 +203,7 @@ int snapshot_save(struct bio *bio) {
         err = -ENOMEM;
         goto snapshot_save_free_session;
     }
-    char *path = kmalloc(strlen(parent) + OCTET_SZ + 2, GFP_KERNEL);
-    if (!path) {
-        err = -ENOMEM;
-        goto snapshot_save_free_parent;
-    }
-    save_bio(path, bio, parent);
-    kfree(path);
-snapshot_save_free_parent:
+    save_bio(bio->bi_private, parent);
     kfree(parent);
 snapshot_save_free_session:
     kfree(session);
