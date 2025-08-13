@@ -11,14 +11,6 @@ static inline long __get_arg1(struct pt_regs *regs) {
 #endif
 }
 
-static inline void set_arg1(struct pt_regs *regs, unsigned long arg1) {
-#ifdef CONFIG_X86_64
-    regs->di = arg1;
-#else
-#error "unsupported architecture"
-#endif
-} 
-
 static inline long __get_arg2(struct pt_regs *regs) {
 #ifdef CONFIG_X86_64
     return regs->si;
@@ -85,10 +77,6 @@ static inline long __get_rval(struct pt_regs *regs) {
 
 struct mount_bdev_data {
     char *dev_name;
-};
-
-struct submit_bio_data {
-    dev_t dev;
 };
 
 struct umount_data {

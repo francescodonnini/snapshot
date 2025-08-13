@@ -8,21 +8,35 @@
 #include <linux/bio.h>
 #include <linux/types.h>
 
+static inline void set_arg1(struct pt_regs *regs, struct bio *arg1) {
+#ifdef CONFIG_X86_64
+    regs->di = (unsigned long)arg1;
+#else
+#error "unsupported architecture"
+#endif
+} 
+
 static void dummy_end_io(struct bio *bio) {
+    struct bio *orig_bio = bio->bi_private;
+    bio_enqueue(orig_bio);
     bio_put(bio);
 }
 
-static void init_dummy_bio(struct bio *bio) {
-    bio->bi_end_io = dummy_end_io;
-}
-
 static struct bio *create_dummy_bio(struct bio *orig_bio) {
-    struct bio *dummy = bio_alloc(bnull_get_bdev(), 0, REQ_OP_READ, GFP_ATOMIC);
+    dbg_dump_bio("creating dummy bio for:\n", orig_bio);
+    struct block_device *bdev = bnull_get_bdev();
+    if (!bdev) {
+        pr_debug(pr_format("bnull instance of struct block_device is NULL"));
+    }
+    struct bio *dummy = bio_alloc(bdev, 0, REQ_OP_READ, GFP_KERNEL);
     if (!dummy) {
-        pr_debug(pr_format("cannot create a dummy bio request for device (%d, %d)\n"), MAJOR(orig_bio->bi_bdev->bd_dev), MINOR(orig_bio->bi_bdev->bd_dev));
+        pr_debug(pr_format("cannot create a dummy bio request for device (%d, %d)\n"), MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev));
         return NULL;
     }
-    init_dummy_bio(dummy);
+    dummy->bi_end_io = dummy_end_io;
+    dummy->bi_iter.bi_sector = 0;
+    dummy->bi_iter.bi_size = 0;
+    dummy->bi_private = orig_bio;
     return dummy;
 }
 
@@ -69,7 +83,6 @@ static bool skip_handler(struct bio *bio) {
  * 3. The original bio request is submitted to workqueue by bio_enqueue for further processing.
  * 4. The write request should be eventually submitted to the bio layer so this kretprobe will intercept the bio request twice,
  *    and even the second time the latter is eligible to be intercepted so we need to keep track of the requests already intercepted.
- *    One way to do this is to set to 1 a flag of the bio structure that is currently (Linux 6.15) not used by the bio layer.
  */
 int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     struct bio *bio = get_arg1(struct bio*, regs);
@@ -81,13 +94,10 @@ int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
         return 1;
     }
     struct bio *dummy_bio = create_dummy_bio(bio);
-    if (!dummy_bio) {
-        return 1;
+    if (dummy_bio) {
+        set_arg1(regs, dummy_bio);
+    } else {
+        pr_debug(pr_format("cannot create dummy bio"));
     }
-    if (!bio_enqueue(bio)) {
-        pr_debug(pr_format("cannot enqueue bio for device (%d, %d)\n"), MAJOR(bio_devnum(bio)), MINOR(bio_devnum(bio)));
-        return 1;
-    }
-    set_arg1(regs, (unsigned long)dummy_bio);
     return 0;
 }

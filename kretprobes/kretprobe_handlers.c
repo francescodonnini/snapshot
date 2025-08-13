@@ -8,7 +8,7 @@
 
 static struct kretprobe submit_bio_kretprobe = {
     .kp.symbol_name = "submit_bio",
-    .entry_handler = submit_bio_entry_handler
+    .entry_handler = submit_bio_entry_handler,
 };
 
 static struct kretprobe mount_bdev_kretprobe = {

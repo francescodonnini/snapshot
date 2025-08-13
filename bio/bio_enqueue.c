@@ -30,11 +30,10 @@ void bio_deferred_work_cleanup(void) {
 }
 
 static void dbg_dump_bio_content(struct bio *bio) {
-    struct bio_vec *bv;
-    int iter;
-    bio_for_each_bvec_all(bv, bio, iter) {
-        char *va = kmap_local_page(bv->bv_page);
-        pr_debug(pr_format("processing data at address %p of size %d\n"), va, bv->bv_len);
+    struct bio_private_data *p = bio->bi_private;
+    for (int i = 0; i < p->block.nr_pages; ++i) {
+        char *va = kmap_local_page(p->block.pages[i]);
+        pr_debug(pr_format("processing data at address %p of size %lu\n"), va, PAGE_SIZE);
         print_hex_dump_bytes("data: ", DUMP_PREFIX_OFFSET, va, 64);
         kunmap_local(va);
     }
@@ -56,7 +55,6 @@ static void dbg_dump_read_bio(struct bio *bio) {
  * block IO layer
  */
 static void read_original_block_end_io(struct bio *bio) {
-    dbg_dump_read_bio(bio);
     if (bio_status_ok(bio)) {
         snapshot_save(bio);
     } else {
@@ -167,7 +165,6 @@ static struct bio* create_read_bio(struct bio *orig_bio) {
 static void process_bio(struct work_struct *work) {
     struct bio_work *w = container_of(work, struct bio_work, work);
     struct bio *orig_bio = w->orig_bio;
-    dbg_dump_bio("processing bio:\n", orig_bio);
     struct bio *rb = create_read_bio(orig_bio);
     if (!rb) {
         submit_bio(orig_bio);

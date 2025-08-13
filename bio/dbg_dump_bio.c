@@ -70,7 +70,7 @@ void dbg_dump_bio(const char *prefix, struct bio *bio) {
             "iter::bvec_done     =%s\n"
             "iter::idx           =%d\n"
             "iter::sector        =%lld\n"
-            "iter::size=%u\n"),
+            "iter::size          =%u\n"),
         prefix,
         bio,
         bio_status_str(bio),
