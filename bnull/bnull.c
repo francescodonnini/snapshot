@@ -23,9 +23,6 @@ static struct bnull_dev {
 static blk_status_t null_queue_rq(struct blk_mq_hw_ctx *hctx,
                                   const struct blk_mq_queue_data *bd) {
     struct request *rq = bd->rq;
-    pr_debug(pr_format("request::size=%d"), blk_rq_bytes(rq));
-    if (rq->bio)
-        dbg_dump_bio("request::bio\n", rq->bio);
     blk_mq_start_request(rq);
     blk_mq_end_request(rq, BLK_STS_OK);
     return BLK_STS_OK;

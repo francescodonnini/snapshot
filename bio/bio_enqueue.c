@@ -31,24 +31,24 @@ void bio_deferred_work_cleanup(void) {
 
 static void dbg_dump_bio_content(struct bio *bio) {
     struct bio_private_data *p = bio->bi_private;
-    for (int i = 0; i < p->block.nr_pages; ++i) {
-        char *va = kmap_local_page(p->block.pages[i]);
+    for (int i = 0; i < p->nr_pages; ++i) {
+        char *va = kmap_local_page(p->pages[i]);
         pr_debug(pr_format("processing data at address %p of size %lu\n"), va, PAGE_SIZE);
         print_hex_dump_bytes("data: ", DUMP_PREFIX_OFFSET, va, 64);
         kunmap_local(va);
     }
 }
 
-static void dbg_dump_read_bio(struct bio *bio) {
-    dbg_dump_bio("read bio completed\n", bio);
+static void dbg_dump_read_bio(const char *prefix, struct bio *bio) {
+    dbg_dump_bio(prefix, bio);
     if (bio->bi_status == BLK_STS_OK) {
         dbg_dump_bio_content(bio);
     }
 }
 
 static inline void free_bio_pages(struct bio_private_data *p) {
-    for (int i = 0; i < p->block.nr_pages; ++i) {
-        __free_page(p->block.pages[i]);
+    for (int i = 0; i < p->nr_pages; ++i) {
+        __free_page(p->pages[i]);
     }
 }
 
@@ -61,7 +61,7 @@ static void read_original_block_end_io(struct bio *bio) {
         int err = snapshot_save(bio);
         if (err) {
             pr_debug(
-                pr_format("cannot save snapshot %d for device %d,%d, got error %d"),
+                pr_format("cannot save snapshot %llu for device %d,%d, got error %d"),
                 bio->bi_iter.bi_sector,
                 MAJOR(bio->bi_bdev->bd_dev), MINOR(bio->bi_bdev->bd_dev),
                 err);
@@ -76,13 +76,13 @@ static void read_original_block_end_io(struct bio *bio) {
     bio_put(bio);
 }
 
-static inline int bio_block_add_page(struct bio *bio, int i, struct page *page) {
-    struct bio_private_data *priv = bio->bi_private;
-    if (i >= priv->block.nr_pages) {
+static inline int __add_page(struct bio *bio, int i, struct page *page) {
+    struct bio_private_data *p = bio->bi_private;
+    if (i >= p->nr_pages) {
         pr_debug(pr_format("trying to add too much pages to bio block private data"));
         return -1;
     }
-    priv->block.pages[i] = page;
+    p->pages[i] = page;
     return 0;
 }
 
@@ -96,7 +96,7 @@ static inline int add_page(struct bio *bio, int i) {
         __free_page(page);
         return -1;
     }
-    return bio_block_add_page(bio, i, page);
+    return __add_page(bio, i, page);
 }
 
 static int allocate_pages(struct bio *bio, int nr_pages) {
@@ -114,7 +114,7 @@ static int allocate_pages(struct bio *bio, int nr_pages) {
 allocate_pages_out:
     struct bio_private_data *p = bio->bi_private;
     for (int i = 0; i < count; ++i) {
-        __free_page(p->block.pages[i]);
+        __free_page(p->pages[i]);
     }
     return err;
 }
@@ -123,7 +123,9 @@ static inline unsigned int bio_nr_pages(struct bio *bio) {
     return (bio->bi_iter.bi_size + PAGE_SIZE - 1) / PAGE_SIZE;
 }
 
-static struct bio_private_data *mk_private_data(sector_t sector, int nr_pages) {
+static struct bio_private_data *mk_private_data(struct bio *orig_bio) {
+    int nr_pages = bio_nr_pages(orig_bio);
+    sector_t sector = bio_sector(orig_bio);
     struct bio_private_data *data;
     size_t size = sizeof(*data) + sizeof(struct page*) * nr_pages;
     data = kmalloc(size, GFP_KERNEL);
@@ -131,14 +133,14 @@ static struct bio_private_data *mk_private_data(sector_t sector, int nr_pages) {
         pr_debug(pr_format("cannot allocate enough memory for struct bio_private_data(%d)"), nr_pages);
         return NULL;
     }
-    data->block.nr_pages = nr_pages;
-    data->block.sector = sector;
-    data->block.pages = (struct page**)data + sizeof(*data);
+    data->orig_bio = orig_bio;
+    data->nr_pages = nr_pages;
+    data->sector = sector;
     return data;
 }
 
 static struct bio* allocate_read_bio(struct bio *orig_bio) {
-    struct bio_private_data *private_data = mk_private_data(bio_sector(orig_bio), bio_nr_pages(orig_bio));
+    struct bio_private_data *private_data = mk_private_data(orig_bio);
     if (!private_data) {
         return NULL;
     }
@@ -150,7 +152,6 @@ static struct bio* allocate_read_bio(struct bio *orig_bio) {
     }
     read_bio->bi_iter.bi_sector = bio_sector(orig_bio);
     read_bio->bi_end_io = read_original_block_end_io;
-    private_data->orig_bio = orig_bio;
     read_bio->bi_private = private_data;
     return read_bio;
 }
@@ -188,7 +189,7 @@ bool bio_enqueue(struct bio *bio) {
     struct bio_work *w;
     w = kzalloc(sizeof(*w), GFP_KERNEL);
     if (!w) {
-        pr_debug(pr_format("cannot create bio_work struct for device (%d, %d)"), MAJOR(bio_devnum(bio)), MINOR(bio_devnum(bio)));
+        pr_debug(pr_format("cannot create bio_work struct for device (%d, %d)"), MAJOR(bio_devno(bio)), MINOR(bio_devno(bio)));
         return false;
     }
     w->orig_bio = bio;

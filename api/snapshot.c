@@ -164,11 +164,11 @@ static inline char *ltoa(sector_t sector, char *buffer) {
     return buffer;
 }
 
-static void save_bio(struct bio_private_data *priv, const char *parent) {
+static void save_bio(struct bio_private_data *p, const char *parent) {
     char octet[OCTET_SZ + 1] = {0};
-    sector_t sector = priv->block.sector;
-    for (int i = 0; i < priv->block.nr_pages; ++i, sector += PAGE_SIZE) {
-        struct page *page = priv->block.pages[i];
+    sector_t sector = p->sector;
+    for (int i = 0; i < p->nr_pages; ++i, sector += PAGE_SIZE) {
+        struct page *page = p->pages[i];
         char *path = kzalloc(strlen(parent) + OCTET_SZ + 2, GFP_KERNEL);
         if (!path) {
             pr_debug(pr_format("cannot allocate enough space for path"));
@@ -192,9 +192,9 @@ int snapshot_save(struct bio *bio) {
         return -ENOMEM;
     }
     int err = 0;
-    bool found = registry_get_session_id(bio_devnum(bio), session);
+    bool found = registry_get_session_id(bio_devno(bio), session);
     if (!found) {
-        pr_debug(pr_format("cannot find session associated with device %d,%d"), MAJOR(bio_devnum(bio)), MINOR(bio_devnum(bio)));
+        pr_debug(pr_format("cannot find session associated with device %d,%d"), MAJOR(bio_devno(bio)), MINOR(bio_devno(bio)));
         err = -EWRONGCRED;
         goto snapshot_save_free_session;
     }

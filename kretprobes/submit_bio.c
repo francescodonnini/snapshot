@@ -23,7 +23,6 @@ static void dummy_end_io(struct bio *bio) {
 }
 
 static struct bio *create_dummy_bio(struct bio *orig_bio) {
-    dbg_dump_bio("creating dummy bio for:\n", orig_bio);
     struct block_device *bdev = bnull_get_bdev();
     if (!bdev) {
         pr_debug(pr_format("bnull instance of struct block_device is NULL"));
@@ -54,7 +53,13 @@ static bool skip_handler(struct bio *bio) {
         return true;
     }
     bool added;
-    int err = registry_add_sector(bio_devnum(bio), bio_sector(bio), &added);
+    dev_t devno;
+    if (!bio_denvo_safe(bio, &devno)) {
+        pr_debug(pr_format("cannot read device number from bio struct"));
+        return true;
+    }
+    sector_t sector = bio_sector(bio);
+    int err = registry_add_sector(devno, sector, &added);
     if (err) {
         if (err != -ENOSSN) {
             pr_debug(pr_format("hashset_add completed with error %d"), err);
@@ -62,9 +67,9 @@ static bool skip_handler(struct bio *bio) {
         return true;
     }
     if (!added) {
-        pr_debug(pr_format("bio: dev=%d,%d, sector=%llu already exists"), MAJOR(bio_devnum(bio)), MINOR(bio_devnum(bio)), bio_sector(bio));
+        pr_debug(pr_format("bio: dev=%d,%d, sector=%llu already exists"), MAJOR(devno), MINOR(devno), sector);
     } else {
-        pr_debug(pr_format("bio: dev=%d,%d, sector=%llu added to block table"), MAJOR(bio_devnum(bio)), MINOR(bio_devnum(bio)), bio_sector(bio));
+        pr_debug(pr_format("bio: dev=%d,%d, sector=%llu added to block table"), MAJOR(devno), MINOR(devno), sector);
     }
     return !added;
 }

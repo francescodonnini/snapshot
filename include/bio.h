@@ -11,8 +11,10 @@ struct bio_block {
 };
 
 struct bio_private_data {
-    struct bio       *orig_bio;
-    struct bio_block  block;
+    struct bio  *orig_bio;
+    sector_t     sector;
+    int          nr_pages;
+    struct page *pages[];   
 };
 
 int bio_deferred_work_init(void);
