@@ -31,25 +31,8 @@ static blk_status_t null_queue_rq(struct blk_mq_hw_ctx *hctx,
     return BLK_STS_OK;
 }
 
-
-static void null_queue_rqs(struct rq_list *rqlist) {
-    struct rq_list requeue_list = {};
-    struct blk_mq_queue_data bd = {};
-    blk_status_t ret;
-    do {
-        struct request *rq = rq_list_pop(rqlist);
-        bd.rq = rq;
-        ret = null_queue_rq(rq->mq_hctx, &bd);
-        if (ret != BLK_STS_OK) {
-            rq_list_add_tail(&requeue_list, rq);
-        }
-    } while (!rq_list_empty(rqlist));
-    *rqlist = requeue_list;
-}
-
 static struct blk_mq_ops qops = {
     .queue_rq = null_queue_rq,
-    .queue_rqs = null_queue_rqs,
 };
 
 static const struct block_device_operations bops = {

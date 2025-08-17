@@ -39,14 +39,16 @@ static void dbg_dump_bio_content(struct bio *bio) {
     }
 }
 
-static inline bool bio_status_ok(struct bio *bio) {
-    return bio->bi_status == BLK_STS_OK;
-}
-
 static void dbg_dump_read_bio(struct bio *bio) {
     dbg_dump_bio("read bio completed\n", bio);
-    if (bio_status_ok(bio)) {
+    if (bio->bi_status == BLK_STS_OK) {
         dbg_dump_bio_content(bio);
+    }
+}
+
+static inline void free_bio_pages(struct bio_private_data *p) {
+    for (int i = 0; i < p->block.nr_pages; ++i) {
+        __free_page(p->block.pages[i]);
     }
 }
 
@@ -55,23 +57,23 @@ static void dbg_dump_read_bio(struct bio *bio) {
  * block IO layer
  */
 static void read_original_block_end_io(struct bio *bio) {
-    if (bio_status_ok(bio)) {
-        snapshot_save(bio);
+    if (bio->bi_status == BLK_STS_OK) {
+        int err = snapshot_save(bio);
+        if (err) {
+            pr_debug(
+                pr_format("cannot save snapshot %d for device %d,%d, got error %d"),
+                bio->bi_iter.bi_sector,
+                MAJOR(bio->bi_bdev->bd_dev), MINOR(bio->bi_bdev->bd_dev),
+                err);
+            free_bio_pages((struct bio_private_data*)bio->bi_private);
+        }
     } else {
         pr_debug(pr_format("bio completed with error %d"), bio->bi_status);
     }
-    struct bio_private_data *priv = bio->bi_private;
-    submit_bio(priv->orig_bio);
-    kfree(priv);
+    struct bio_private_data *p = bio->bi_private;
+    submit_bio(p->orig_bio);
+    kfree(p);
     bio_put(bio);
-}
-
-static inline void free_bio_pages(struct bio *bio) {
-    struct bio_vec bv;
-    struct bvec_iter iter;
-    bio_for_each_bvec(bv, bio, iter) {
-        __free_page(bv.bv_page);
-    }
 }
 
 static inline int bio_block_add_page(struct bio *bio, int i, struct page *page) {
@@ -90,7 +92,7 @@ static inline int add_page(struct bio *bio, int i) {
         return -ENOMEM;
     }
     int err = bio_add_page(bio, page, PAGE_SIZE, 0);
-    if (err < PAGE_SIZE) {
+    if (err != PAGE_SIZE) {
         __free_page(page);
         return -1;
     }
@@ -98,17 +100,22 @@ static inline int add_page(struct bio *bio, int i) {
 }
 
 static int allocate_pages(struct bio *bio, int nr_pages) {
+    int count = 0;
     int err = 0;
     for (int i = 0; i < nr_pages; ++i) {
         int err = add_page(bio, i);
         if (err) {
             goto allocate_pages_out;
         }
+        ++count;
     }
     return err;
 
 allocate_pages_out:
-    free_bio_pages(bio);
+    struct bio_private_data *p = bio->bi_private;
+    for (int i = 0; i < count; ++i) {
+        __free_page(p->block.pages[i]);
+    }
     return err;
 }
 

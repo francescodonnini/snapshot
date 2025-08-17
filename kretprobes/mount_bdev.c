@@ -23,10 +23,6 @@ int mount_bdev_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
     return 0;
 }
 
-static inline void dbg_already_registered(const char *dev_name, struct block_device *bdev) {
-    
-}
-
 /**
  * mount_bdev_handler checks whether mount_bdev completed successfully, then it registers
  * the device number (MAJOR, minor) in the registry if the block device just mounted was previously
@@ -43,7 +39,7 @@ int mount_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     struct block_device *bdev = dentry->d_sb->s_bdev;
     if (registry_lookup_active(bdev->bd_dev)) {
         pr_debug(pr_format("device %s with device number (%d, %d) does not exist or is already registered"),
-             dev_name, MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev));
+                 data->dev_name, MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev));
     } else {
         update_session(data->dev_name, bdev);
     }
