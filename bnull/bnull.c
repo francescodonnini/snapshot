@@ -27,6 +27,7 @@ static blk_status_t null_queue_rq(struct blk_mq_hw_ctx *hctx,
     if (rq->bio)
         dbg_dump_bio("request::bio\n", rq->bio);
     blk_mq_start_request(rq);
+    blk_mq_end_request(rq, BLK_STS_OK);
     return BLK_STS_OK;
 }
 

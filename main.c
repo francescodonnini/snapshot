@@ -53,8 +53,18 @@ registry_failed:
     return err;
 }
 
+static void __exit bsnapshot_exit(void) {
+    probes_cleanup();
+    chrdev_cleanup();
+    registry_cleanup();
+    bnull_cleanup();
+    bio_deferred_work_cleanup();
+    snapshot_cleanup();
+}
+
 MODULE_AUTHOR("Francesco Donnini <donnini.francesco00@gmail.com>");
 MODULE_DESCRIPTION("Block-device snapshot");
 MODULE_LICENSE("GPL");
 
 module_init(bsnapshot_init);
+module_exit(bsnapshot_exit);

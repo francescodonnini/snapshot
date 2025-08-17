@@ -19,8 +19,7 @@ snapshot-objs := 	api/activate_snapshot.o \
 					kretprobes/path_umount.o \
 					kretprobes/submit_bio.o \
 					kretprobes/update_session.o \
-					exit.o \
-					init.o \
+					main.o \
 
 PWD := $(CURDIR) 
 

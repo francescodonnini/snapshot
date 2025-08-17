@@ -28,7 +28,7 @@ static struct bio *create_dummy_bio(struct bio *orig_bio) {
     if (!bdev) {
         pr_debug(pr_format("bnull instance of struct block_device is NULL"));
     }
-    struct bio *dummy = bio_alloc(bdev, 0, REQ_OP_READ, GFP_KERNEL);
+    struct bio *dummy = bio_alloc(bdev, 0, REQ_OP_READ, GFP_ATOMIC);
     if (!dummy) {
         pr_debug(pr_format("cannot create a dummy bio request for device (%d, %d)\n"), MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev));
         return NULL;
