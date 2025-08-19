@@ -6,6 +6,7 @@
 #include <linux/bvec.h>
 #include <linux/delay.h>
 #include <linux/list.h>
+#include <linux/string.h>
 #include <linux/workqueue.h>
 
 struct bio_work {
@@ -102,18 +103,28 @@ static inline int add_page(struct bio_vec *bvec, struct bio *bio, int i) {
     return __add_page(bio, i, page, bvec->bv_len, bvec->bv_offset);
 }
 
+static inline void copy_bvec_iter(struct bvec_iter *dst, struct bvec_iter *src) {
+    dst->bi_bvec_done = src->bi_bvec_done;
+    dst->bi_idx = src->bi_idx;
+    dst->bi_sector = src->bi_sector;
+    dst->bi_size = src->bi_size;
+}
+
 static int allocate_pages(struct bio *bio, struct bio *orig_bio) {
     int count = 0;
     int err = 0;
-    struct bio_vec *bvec;
-	int i;
-    bio_for_each_bvec_all(bvec, orig_bio, i) {
-        int err = add_page(bvec, bio, i);
+    struct bvec_iter old;
+    memcpy(&old, &bio->bi_iter, sizeof(struct bvec_iter));
+    struct bio_vec bvec;
+	struct bvec_iter it;
+    bio_for_each_bvec(bvec, orig_bio, it) {
+        int err = add_page(&bvec, bio, count);
         if (err) {
             goto allocate_pages_out;
         }
         ++count;
     }
+    memcpy(&bio->bi_iter, &old, sizeof(struct bvec_iter));
     return err;
 
 allocate_pages_out:
