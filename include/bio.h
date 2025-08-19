@@ -4,17 +4,17 @@
 #include <linux/mm_types.h>
 #include <linux/types.h>
 
-struct bio_block {
-    sector_t      sector;
-    int           nr_pages;
-    struct page **pages;
+struct page_iter {
+    struct page  *page;
+    unsigned int  offset;
+    unsigned int  len;
 };
 
 struct bio_private_data {
-    struct bio  *orig_bio;
-    sector_t     sector;
-    int          nr_pages;
-    struct page *pages[];   
+    struct bio       *orig_bio;
+    sector_t          sector;
+    int               nr_pages;
+    struct page_iter  iter[];
 };
 
 int bio_deferred_work_init(void);

@@ -20,7 +20,7 @@
 struct save_work {
     struct work_struct  work;
     const char         *path;
-    struct page        *page;
+    struct page_iter   *iter;
 };
 
 static struct workqueue_struct *queue;
@@ -124,15 +124,15 @@ int snapshot_create(const char *session) {
 static void save_page(struct work_struct *work) {
     struct save_work *w = container_of(work, struct save_work, work);
     const char *path = w->path;
-    struct page *page = w->page;
+    struct page_iter *it = w->iter;
     struct file *fp = filp_open(path, O_CREAT | O_WRONLY, 0600);
     if (IS_ERR(fp)) {
         pr_debug(pr_format("cannot open file: '%s', got error %ld"), path, PTR_ERR(fp));
         goto save_page_out;
     }
     loff_t off;
-    void *va = kmap_local_page(page);
-    ssize_t n = kernel_write(fp, va, PAGE_SIZE, &off);
+    void *va = kmap_local_page(it->page);
+    ssize_t n = kernel_write(fp, va + it->offset, it->len, &off);
     if (n != PAGE_SIZE) {
         pr_debug(pr_format("kernel_write failed to write whole page at '%s'"), path);
     }
@@ -144,17 +144,17 @@ static void save_page(struct work_struct *work) {
 save_page_out:
     kfree(work);
     kfree(path);
-    __free_page(page);
+    __free_page(it->page);
 }
 
-static int add_work(const char *path, struct page *page) {
+static int add_work(const char *path, struct page_iter *it) {
     struct save_work *w;
     w = kzalloc(sizeof(*w), GFP_KERNEL);
     if (!w) {
         return -ENOMEM;
     }
     w->path = path;
-    w->page = page;
+    w->iter = it;
     INIT_WORK(&w->work, save_page);
     return queue_work(queue, &w->work);
 }
@@ -168,18 +168,18 @@ static void save_bio(struct bio_private_data *p, const char *parent) {
     char octet[OCTET_SZ + 1] = {0};
     sector_t sector = p->sector;
     for (int i = 0; i < p->nr_pages; ++i, sector += PAGE_SIZE) {
-        struct page *page = p->pages[i];
+        struct page_iter *it = &p->iter[i];
         char *path = kzalloc(strlen(parent) + OCTET_SZ + 2, GFP_KERNEL);
         if (!path) {
             pr_debug(pr_format("cannot allocate enough space for path"));
-            __free_page(page);
+            __free_page(it->page);
             continue;
         }
         path_join(parent, ltoa(sector, octet), path);
-        int err = add_work(path, page);
+        int err = add_work(path, it);
         if (err == -ENOMEM) {
             pr_debug(pr_format("add_work failed for file='%s', sector=%llu"), path, sector);
-            __free_page(page);
+            __free_page(it->page);
             kfree(path);
         }
     }

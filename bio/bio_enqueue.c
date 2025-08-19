@@ -32,9 +32,10 @@ void bio_deferred_work_cleanup(void) {
 static void dbg_dump_bio_content(struct bio *bio) {
     struct bio_private_data *p = bio->bi_private;
     for (int i = 0; i < p->nr_pages; ++i) {
-        char *va = kmap_local_page(p->pages[i]);
+        struct page_iter *it = &p->iter[i];
+        char *va = kmap_local_page(it->page);
         pr_debug(pr_format("processing data at address %p of size %lu\n"), va, PAGE_SIZE);
-        print_hex_dump_bytes("data: ", DUMP_PREFIX_OFFSET, va, 64);
+        print_hex_dump_bytes("data: ", DUMP_PREFIX_OFFSET, va + it->offset, it->len);
         kunmap_local(va);
     }
 }
@@ -48,7 +49,7 @@ static void dbg_dump_read_bio(const char *prefix, struct bio *bio) {
 
 static inline void free_bio_pages(struct bio_private_data *p) {
     for (int i = 0; i < p->nr_pages; ++i) {
-        __free_page(p->pages[i]);
+        __free_page(p->iter[i].page);
     }
 }
 
@@ -76,34 +77,38 @@ static void read_original_block_end_io(struct bio *bio) {
     bio_put(bio);
 }
 
-static inline int __add_page(struct bio *bio, int i, struct page *page) {
+static inline int __add_page(struct bio *bio, int i, struct page *page, unsigned int len, unsigned int offset) {
     struct bio_private_data *p = bio->bi_private;
     if (i >= p->nr_pages) {
         pr_debug(pr_format("trying to add too much pages to bio block private data"));
         return -1;
     }
-    p->pages[i] = page;
+    p->iter[i].page = page;
+    p->iter[i].len = len;
+    p->iter[i].offset = offset;
     return 0;
 }
 
-static inline int add_page(struct bio *bio, int i) {
+static inline int add_page(struct bio_vec *bvec, struct bio *bio, int i) {
     struct page *page = alloc_page(GFP_KERNEL);
     if (!page) {
         return -ENOMEM;
     }
-    int err = bio_add_page(bio, page, PAGE_SIZE, 0);
+    int err = bio_add_page(bio, page, bvec->bv_len, bvec->bv_offset);
     if (err != PAGE_SIZE) {
         __free_page(page);
         return -1;
     }
-    return __add_page(bio, i, page);
+    return __add_page(bio, i, page, bvec->bv_len, bvec->bv_offset);
 }
 
-static int allocate_pages(struct bio *bio, int nr_pages) {
+static int allocate_pages(struct bio *bio, struct bio *orig_bio) {
     int count = 0;
     int err = 0;
-    for (int i = 0; i < nr_pages; ++i) {
-        int err = add_page(bio, i);
+    struct bio_vec *bvec;
+	int i;
+    bio_for_each_bvec_all(bvec, orig_bio, i) {
+        int err = add_page(bvec, bio, i);
         if (err) {
             goto allocate_pages_out;
         }
@@ -114,7 +119,7 @@ static int allocate_pages(struct bio *bio, int nr_pages) {
 allocate_pages_out:
     struct bio_private_data *p = bio->bi_private;
     for (int i = 0; i < count; ++i) {
-        __free_page(p->pages[i]);
+        __free_page(p->iter[i].page);
     }
     return err;
 }
@@ -125,9 +130,8 @@ static inline unsigned int bio_nr_pages(struct bio *bio) {
 
 static struct bio_private_data *mk_private_data(struct bio *orig_bio) {
     int nr_pages = bio_nr_pages(orig_bio);
-    sector_t sector = bio_sector(orig_bio);
     struct bio_private_data *data;
-    size_t size = sizeof(*data) + sizeof(struct page*) * nr_pages;
+    size_t size = sizeof(*data) + sizeof(struct page_iter) * nr_pages;
     data = kmalloc(size, GFP_KERNEL);
     if (!data) {
         pr_debug(pr_format("cannot allocate enough memory for struct bio_private_data(%d)"), nr_pages);
@@ -135,7 +139,7 @@ static struct bio_private_data *mk_private_data(struct bio *orig_bio) {
     }
     data->orig_bio = orig_bio;
     data->nr_pages = nr_pages;
-    data->sector = sector;
+    data->sector = bio_sector(orig_bio);
     return data;
 }
 
@@ -161,18 +165,20 @@ static struct bio* create_read_bio(struct bio *orig_bio) {
     if (!read_bio) {
         return NULL;
     }    
-    if (allocate_pages(read_bio, bio_nr_pages(orig_bio))) {
+    if (allocate_pages(read_bio, orig_bio)) {
         pr_debug(pr_format("allocate_pages failed"));
         kfree(read_bio->bi_private);
         bio_put(read_bio);
         return NULL;
     }
+    dbg_dump_bio("read bio created successfully:\n", read_bio);
     return read_bio;
 }
 
 static void process_bio(struct work_struct *work) {
     struct bio_work *w = container_of(work, struct bio_work, work);
     struct bio *orig_bio = w->orig_bio;
+    dbg_dump_bio("processing write bio:\n", orig_bio);
     struct bio *rb = create_read_bio(orig_bio);
     if (!rb) {
         submit_bio(orig_bio);
