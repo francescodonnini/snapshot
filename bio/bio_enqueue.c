@@ -60,7 +60,7 @@ static inline void free_bio_pages(struct bio_private_data *p) {
  */
 static void read_original_block_end_io(struct bio *bio) {
     if (bio->bi_status == BLK_STS_OK) {
-        int err = snapshot_save(bio);
+        int err = -90000;
         if (err) {
             pr_debug(
                 pr_format("cannot save snapshot %llu for device %d,%d, got error %d"),
@@ -91,6 +91,7 @@ static inline int __add_page(struct bio *bio, int i, struct page *page, unsigned
 }
 
 static inline int add_page(struct bio_vec *bvec, struct bio *bio, int i) {
+    pr_debug(pr_format("add_page(%d): [%d, %d)"), i, bvec->bv_offset, bvec->bv_offset);
     struct page *page = alloc_page(GFP_KERNEL);
     if (!page) {
         return -ENOMEM;
@@ -103,18 +104,11 @@ static inline int add_page(struct bio_vec *bvec, struct bio *bio, int i) {
     return __add_page(bio, i, page, bvec->bv_len, bvec->bv_offset);
 }
 
-static inline void copy_bvec_iter(struct bvec_iter *dst, struct bvec_iter *src) {
-    dst->bi_bvec_done = src->bi_bvec_done;
-    dst->bi_idx = src->bi_idx;
-    dst->bi_sector = src->bi_sector;
-    dst->bi_size = src->bi_size;
-}
-
 static int allocate_pages(struct bio *bio, struct bio *orig_bio) {
     int count = 0;
     int err = 0;
     struct bvec_iter old;
-    memcpy(&old, &bio->bi_iter, sizeof(struct bvec_iter));
+    memcpy(&old, &orig_bio->bi_iter, sizeof(struct bvec_iter));
     struct bio_vec bvec;
 	struct bvec_iter it;
     bio_for_each_bvec(bvec, orig_bio, it) {
@@ -124,7 +118,7 @@ static int allocate_pages(struct bio *bio, struct bio *orig_bio) {
         }
         ++count;
     }
-    memcpy(&bio->bi_iter, &old, sizeof(struct bvec_iter));
+    memcpy(&orig_bio->bi_iter, &old, sizeof(struct bvec_iter));
     return err;
 
 allocate_pages_out:
@@ -135,31 +129,26 @@ allocate_pages_out:
     return err;
 }
 
-static inline unsigned int bio_nr_pages(struct bio *bio) {
-    return (bio->bi_iter.bi_size + PAGE_SIZE - 1) / PAGE_SIZE;
-}
-
 static struct bio_private_data *mk_private_data(struct bio *orig_bio) {
-    int nr_pages = bio_nr_pages(orig_bio);
     struct bio_private_data *data;
-    size_t size = sizeof(*data) + sizeof(struct page_iter) * nr_pages;
+    size_t size = sizeof(*data) + sizeof(struct page_iter) * orig_bio->bi_vcnt;
     data = kmalloc(size, GFP_KERNEL);
     if (!data) {
         pr_debug(pr_format("cannot allocate enough memory for struct bio_private_data(%d)"), nr_pages);
         return NULL;
     }
     data->orig_bio = orig_bio;
-    data->nr_pages = nr_pages;
+    data->nr_pages = orig_bio->bi_vcnt;
     data->sector = bio_sector(orig_bio);
     return data;
 }
 
-static struct bio* allocate_read_bio(struct bio *orig_bio) {
+static struct bio* create_read_bio(struct bio *orig_bio) {
     struct bio_private_data *private_data = mk_private_data(orig_bio);
     if (!private_data) {
         return NULL;
     }
-    struct bio *read_bio = bio_alloc(orig_bio->bi_bdev, bio_nr_pages(orig_bio), REQ_OP_READ, GFP_KERNEL);
+    struct bio *read_bio = bio_alloc(orig_bio->bi_bdev, orig_bio->bi_vcnt, REQ_OP_READ, GFP_KERNEL);
     if (!read_bio) {
         pr_debug(pr_format("bio_alloc failed"));
         kfree(private_data);
@@ -168,14 +157,6 @@ static struct bio* allocate_read_bio(struct bio *orig_bio) {
     read_bio->bi_iter.bi_sector = bio_sector(orig_bio);
     read_bio->bi_end_io = read_original_block_end_io;
     read_bio->bi_private = private_data;
-    return read_bio;
-}
-
-static struct bio* create_read_bio(struct bio *orig_bio) {
-    struct bio *read_bio = allocate_read_bio(orig_bio);
-    if (!read_bio) {
-        return NULL;
-    }    
     if (allocate_pages(read_bio, orig_bio)) {
         pr_debug(pr_format("allocate_pages failed"));
         kfree(read_bio->bi_private);
