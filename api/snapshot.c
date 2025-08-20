@@ -20,7 +20,7 @@
 struct save_work {
     struct work_struct  work;
     const char         *path;
-    struct page_iter   *iter;
+    struct page_iter    iter;
 };
 
 static struct workqueue_struct *queue;
@@ -98,7 +98,7 @@ static int mkdir_session(const char *session) {
         pr_debug(pr_format("lookup_one_len failed on '%s', got error %d (%s)"), session, err, errtoa(err));
         goto snapshots_path_put;
     }
-    struct dentry *res = vfs_mkdir(mnt_idmap(parent.mnt), d_inode(parent.dentry), dentry, 0660);
+    struct dentry *res = vfs_mkdir(mnt_idmap(parent.mnt), d_inode(parent.dentry), dentry, 0664);
     if (IS_ERR(res)) {
         err = PTR_ERR(res);
         pr_debug(pr_format("vfs_mkdir failed on '%s/%s', got error %d (%s)"), ROOT_DIR, session, err, errtoa(err));
@@ -124,14 +124,19 @@ int snapshot_create(const char *session) {
 static void save_page(struct work_struct *work) {
     struct save_work *w = container_of(work, struct save_work, work);
     const char *path = w->path;
-    struct page_iter *it = w->iter;
-    struct file *fp = filp_open(path, O_CREAT | O_WRONLY, 0600);
+    struct page_iter *it = &w->iter;
+    struct file *fp = filp_open(path, O_CREAT | O_WRONLY, 0664);
     if (IS_ERR(fp)) {
         pr_debug(pr_format("cannot open file: '%s', got error %ld"), path, PTR_ERR(fp));
         goto save_page_out;
     }
     loff_t off;
     void *va = kmap_local_page(it->page);
+    pr_debug(pr_format("save page=%p,(%p),%d,%d"), va, it, it->offset, it->len);
+    if (it->offset + it->len > PAGE_SIZE) {
+        pr_debug(pr_format("out of page bound: [%d, %d)"), it->offset, it->len);
+        goto save_page_out;
+    }
     ssize_t n = kernel_write(fp, va + it->offset, it->len, &off);
     if (n != it->len) {
         pr_debug(pr_format("kernel_write failed to write whole page at '%s'"), path);
@@ -154,7 +159,8 @@ static int add_work(const char *path, struct page_iter *it) {
         return -ENOMEM;
     }
     w->path = path;
-    w->iter = it;
+    memcpy(&w->iter, it, sizeof(*it));
+    pr_debug(pr_format("iter(%p)=%p,%d,%d"), it, it->page, it->offset, it->len);
     INIT_WORK(&w->work, save_page);
     return queue_work(queue, &w->work);
 }
@@ -167,21 +173,21 @@ static inline char *ltoa(sector_t sector, char *buffer) {
 static void save_bio(struct bio_private_data *p, const char *parent) {
     char octet[OCTET_SZ + 1] = {0};
     sector_t sector = p->sector;
-    for (int i = 0; i < p->nr_pages; ++i, sector += PAGE_SIZE) {
+    for (int i = 0; i < p->nr_pages; ++i) {
         struct page_iter *it = &p->iter[i];
-        char *path = kzalloc(strlen(parent) + OCTET_SZ + 2, GFP_KERNEL);
+        char *path = path_join_alloc(parent, ltoa(sector, octet));
         if (!path) {
             pr_debug(pr_format("cannot allocate enough space for path"));
             __free_page(it->page);
-            continue;
+        } else {
+            int err = add_work(path, it);
+            if (err == -ENOMEM) {
+                pr_debug(pr_format("add_work failed for file='%s', sector=%llu"), path, sector);
+                __free_page(it->page);
+                kfree(path);
+            }
         }
-        path_join(parent, ltoa(sector, octet), path);
-        int err = add_work(path, it);
-        if (err == -ENOMEM) {
-            pr_debug(pr_format("add_work failed for file='%s', sector=%llu"), path, sector);
-            __free_page(it->page);
-            kfree(path);
-        }
+        sector += it->len;
     }
 }
 

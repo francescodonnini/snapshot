@@ -60,14 +60,13 @@ static inline void free_bio_pages(struct bio_private_data *p) {
  */
 static void read_original_block_end_io(struct bio *bio) {
     if (bio->bi_status == BLK_STS_OK) {
-        int err = -90000;
+        int err = snapshot_save(bio);
         if (err) {
             pr_debug(
                 pr_format("cannot save snapshot %llu for device %d,%d, got error %d"),
                 bio->bi_iter.bi_sector,
                 MAJOR(bio->bi_bdev->bd_dev), MINOR(bio->bi_bdev->bd_dev),
                 err);
-            free_bio_pages((struct bio_private_data*)bio->bi_private);
         }
     } else {
         pr_debug(pr_format("bio completed with error %d"), bio->bi_status);
@@ -88,6 +87,7 @@ static inline int __add_page(struct bio *bio, int i, struct page *page, unsigned
     p->iter[i].page = page;
     p->iter[i].len = len;
     p->iter[i].offset = offset;
+    pr_debug(pr_format("iter=%p,%d,%d"), p->iter[i].page, p->iter[i].offset, p->iter[i].len);
     return 0;
 }
 
@@ -143,7 +143,7 @@ allocate_pages_out:
 static struct bio* create_read_bio(struct bio *orig_bio) {
     struct bio_private_data *data;
     size_t size = sizeof(*data) + sizeof(struct page_iter) * orig_bio->bi_vcnt;
-    data = kmalloc(size, GFP_KERNEL);
+    data = kzalloc(size, GFP_KERNEL);
     if (!data) {
         pr_debug(pr_format("cannot allocate enough memory for struct bio_private_data(%d)"), orig_bio->bi_vcnt);
         return NULL;
@@ -157,20 +157,23 @@ static struct bio* create_read_bio(struct bio *orig_bio) {
     struct bio *read_bio = bio_alloc(orig_bio->bi_bdev, orig_bio->bi_vcnt, REQ_OP_READ, GFP_KERNEL);
     if (!read_bio) {
         pr_debug(pr_format("bio_alloc failed"));
-        kfree(data);
-        return NULL;
+        goto no_bio;
     }
     read_bio->bi_iter.bi_sector = bio_sector(orig_bio);
     read_bio->bi_end_io = read_original_block_end_io;
     read_bio->bi_private = data;
     if (allocate_pages(read_bio, orig_bio)) {
         pr_debug(pr_format("allocate_pages failed"));
-        kfree(read_bio->bi_private);
-        bio_put(read_bio);
-        return NULL;
+        goto no_pages;
     }
     dbg_dump_bio("read bio created successfully:\n", read_bio);
     return read_bio;
+no_pages:
+    bio_put(read_bio);
+no_bio:
+    kfree(data);
+    return NULL;
+
 }
 
 static void process_bio(struct work_struct *work) {

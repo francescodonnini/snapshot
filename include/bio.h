@@ -10,6 +10,10 @@ struct page_iter {
     unsigned int  len;
 };
 
+/**
+ * bio_private_data contains the original write bio request, the sector from which the write starts,
+ * the number of pages to use to contains the data and an auxiliary struct to hold the data read from the device
+ */
 struct bio_private_data {
     struct bio       *orig_bio;
     sector_t          sector;
