@@ -99,6 +99,7 @@ static inline int add_page(struct bio_vec *bvec, struct bio *bio, int i) {
     }
     int err = bio_add_page(bio, page, bvec->bv_len, bvec->bv_offset);
     if (err != bvec->bv_len) {
+        pr_debug(pr_format("bio_add_page failed with error %d"), bvec->bv_len);
         __free_page(page);
         return -1;
     }

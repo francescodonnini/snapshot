@@ -133,7 +133,7 @@ static void save_page(struct work_struct *work) {
     loff_t off;
     void *va = kmap_local_page(it->page);
     ssize_t n = kernel_write(fp, va + it->offset, it->len, &off);
-    if (n != PAGE_SIZE) {
+    if (n != it->len) {
         pr_debug(pr_format("kernel_write failed to write whole page at '%s'"), path);
     }
     kunmap_local(va);
