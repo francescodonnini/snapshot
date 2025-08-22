@@ -20,6 +20,8 @@ void registry_cleanup(void);
 
 int registry_add_sector(dev_t dev, sector_t sector, bool *added);
 
+int registry_lookup_sector(dev_t dev, sector_t sector, bool *present);
+
 bool registry_get_session_id(dev_t dev, char *id);
 
 int registry_insert(const char *dev_name, const char *password);

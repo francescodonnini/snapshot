@@ -21,6 +21,8 @@ struct save_work {
     struct work_struct  work;
     const char         *path;
     struct page_iter    iter;
+    dev_t               devno;
+    sector_t            sector;
 };
 
 static struct workqueue_struct *queue;
@@ -146,23 +148,15 @@ static void save_page(struct work_struct *work) {
     if (err) {
         pr_debug(pr_format("filp_close failed to close file at '%s', got error %d"), path, err);
     }
+    // Only at this point a write bio request can avoid the slow path
+    err = registry_add_sector(w->devno, w->sector, NULL);
+    if (err) {
+        pr_debug(pr_format("registry_add_sector failed to add pair (%d, %llu), got error %d"), w->devno, w->sector, err);
+    }
 save_page_out:
     kfree(work);
     kfree(path);
     __free_page(it->page);
-}
-
-static int add_work(const char *path, struct page_iter *it) {
-    struct save_work *w;
-    w = kzalloc(sizeof(*w), GFP_KERNEL);
-    if (!w) {
-        return -ENOMEM;
-    }
-    w->path = path;
-    memcpy(&w->iter, it, sizeof(*it));
-    pr_debug(pr_format("iter(%p)=%p,%d,%d"), it, it->page, it->offset, it->len);
-    INIT_WORK(&w->work, save_page);
-    return queue_work(queue, &w->work);
 }
 
 static inline char *ltoa(sector_t sector, char *buffer) {
@@ -170,48 +164,73 @@ static inline char *ltoa(sector_t sector, char *buffer) {
     return buffer;
 }
 
-static void save_bio(struct bio_private_data *p, const char *parent) {
+static int add_work(dev_t devno, sector_t sector, struct page_iter *it, const char *parent) {
     char octet[OCTET_SZ + 1] = {0};
+    char *path = path_join_alloc(parent, ltoa(sector, octet));
+    if (!path) {
+        pr_debug(pr_format("cannot allocate enough space for path"));
+        return -ENOMEM;
+    }
+    struct save_work *w;
+    w = kzalloc(sizeof(*w), GFP_KERNEL);
+    if (!w) {
+        pr_debug(pr_format("add_work failed for file='%s', sector=%llu"), path, sector);
+        return -ENOMEM;
+    }
+    w->path = path;
+    memcpy(&w->iter, it, sizeof(*it));
+    w->devno = devno;
+    w->sector = sector;
+    pr_debug(pr_format("iter(%p)=%p,%d,%d"), it, it->page, it->offset, it->len);
+    INIT_WORK(&w->work, save_page);
+    return queue_work(queue, &w->work);
+}
+
+static void save_bio(struct bio_private_data *p, const char *parent) {
+    dev_t devno = p->orig_bio->bi_bdev->bd_dev;
     sector_t sector = p->sector;
     for (int i = 0; i < p->nr_pages; ++i) {
         struct page_iter *it = &p->iter[i];
-        char *path = path_join_alloc(parent, ltoa(sector, octet));
-        if (!path) {
-            pr_debug(pr_format("cannot allocate enough space for path"));
+        int err = add_work(devno, sector, it, parent);
+        if (err == -ENOMEM) {
             __free_page(it->page);
-        } else {
-            int err = add_work(path, it);
-            if (err == -ENOMEM) {
-                pr_debug(pr_format("add_work failed for file='%s', sector=%llu"), path, sector);
-                __free_page(it->page);
-                kfree(path);
-            }
         }
         sector += it->len;
     }
 }
 
+static inline void free_bio_pages(struct bio_private_data *p) {
+    for (int i = 0; i < p->nr_pages; ++i) {
+        __free_page(p->iter[i].page);
+    }
+}
+
 int snapshot_save(struct bio *bio) {
+    int err = 0;
     char *session = kzalloc(UUID_STRING_LEN + 1, GFP_KERNEL);
     if (!session) {
         pr_debug(pr_format("cannot make enough space to hold session id"));
-        return -ENOMEM;
+        err = -ENOMEM;
+        goto no_session;
     }
-    int err = 0;
     bool found = registry_get_session_id(bio_devno(bio), session);
     if (!found) {
         pr_debug(pr_format("cannot find session associated with device %d,%d"), MAJOR(bio_devno(bio)), MINOR(bio_devno(bio)));
         err = -EWRONGCRED;
-        goto snapshot_save_free_session;
+        goto free_session;
     }
     char *parent = path_join_alloc(ROOT_DIR, session);
     if (!parent) {
         err = -ENOMEM;
-        goto snapshot_save_free_session;
+        goto free_session;
     }
     save_bio(bio->bi_private, parent);
     kfree(parent);
-snapshot_save_free_session:
+free_session:
     kfree(session);
+no_session:
+    if (err) {
+        free_bio_pages(bio->bi_private);
+    }
     return err;
 }

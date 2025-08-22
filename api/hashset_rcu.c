@@ -34,7 +34,7 @@ void hashset_destroy(struct hashset *set) {
 }
 
 static inline struct sector_obj *mk_sector_obj(sector_t sector) {
-    struct sector_obj *obj = kmalloc(sizeof(struct sector_obj), GFP_KERNEL);
+    struct sector_obj *obj = kzalloc(sizeof(struct sector_obj), GFP_KERNEL);
     if (!obj) {
         return ERR_PTR(-ENOMEM);
     }
@@ -48,18 +48,24 @@ static inline struct sector_obj *mk_sector_obj(sector_t sector) {
  * error occurred during the insertion of the sector in the hashtable (see rhashtable_lookup_insert_fast() for
  * further details).
  */
-int hashset_add(struct hashset *set, dev_t dev, sector_t sector, bool *added) {
+int hashset_add(struct hashset *set, sector_t sector, bool *added) {
     struct sector_obj *obj = mk_sector_obj(sector);
     if (!obj) {
         return -ENOMEM;
     }
     rcu_read_lock();
     int err = rhashtable_lookup_insert_fast(&set->ht, &obj->linkage, sector_set_params);
-    *added = err == 0;
+    if (added) {
+        *added = err == 0;
+    }
     if (err) {
         err = err == -EEXIST ? 0 : err;
         kfree(obj);
     }
     rcu_read_unlock();
     return err;
+}
+
+bool hashset_lookup(struct hashset *set, sector_t sector) {
+    return rhashtable_lookup(&set->ht, &sector, sector_set_params) != NULL;
 }

@@ -52,26 +52,26 @@ static bool skip_handler(struct bio *bio) {
     if (!bio || !op_is_write(bio->bi_opf)) {
         return true;
     }
-    bool added;
+    bool present;
     dev_t devno;
     if (!bio_denvo_safe(bio, &devno)) {
         pr_debug(pr_format("cannot read device number from bio struct"));
         return true;
     }
     sector_t sector = bio_sector(bio);
-    int err = registry_add_sector(devno, sector, &added);
+    int err = registry_lookup_sector(devno, sector, &present);
     if (err) {
         if (err != -ENOSSN) {
             pr_debug(pr_format("hashset_add completed with error %d"), err);
         }
         return true;
     }
-    if (!added) {
-        pr_debug(pr_format("bio: dev=%d,%d, sector=%llu already exists"), MAJOR(devno), MINOR(devno), sector);
+    if (present) {
+        pr_debug(pr_format("bio: dev=%d,%d, sector=%llu isn't in the block table"), MAJOR(devno), MINOR(devno), sector);
     } else {
-        pr_debug(pr_format("bio: dev=%d,%d, sector=%llu added to block table"), MAJOR(devno), MINOR(devno), sector);
+        pr_debug(pr_format("bio: dev=%d,%d, sector=%llu is already in the block table"), MAJOR(devno), MINOR(devno), sector);
     }
-    return !added;
+    return present;
 }
 
 /**

@@ -10,8 +10,8 @@
 #include <linux/workqueue.h>
 
 struct bio_work {
-    struct work_struct work;
-    struct bio *orig_bio;
+    struct work_struct  work;
+    struct bio         *orig_bio;
 };
 
 static struct workqueue_struct *wq;
@@ -48,12 +48,6 @@ static void dbg_dump_read_bio(const char *prefix, struct bio *bio) {
     }
 }
 
-static inline void free_bio_pages(struct bio_private_data *p) {
-    for (int i = 0; i < p->nr_pages; ++i) {
-        __free_page(p->iter[i].page);
-    }
-}
-
 /**
  * read_original_block_end_io saves current bio to file and submit original write bio to
  * block IO layer
@@ -63,7 +57,7 @@ static void read_original_block_end_io(struct bio *bio) {
         int err = snapshot_save(bio);
         if (err) {
             pr_debug(
-                pr_format("cannot save snapshot %llu for device %d,%d, got error %d"),
+                pr_format("snapshot_save %llu failed for device %d,%d, got error %d"),
                 bio->bi_iter.bi_sector,
                 MAJOR(bio->bi_bdev->bd_dev), MINOR(bio->bi_bdev->bd_dev),
                 err);
@@ -78,7 +72,6 @@ static void read_original_block_end_io(struct bio *bio) {
 }
 
 static inline int __add_page(struct bio *bio, int i, struct page *page, unsigned int len, unsigned int offset) {
-    pr_debug(pr_format("i=%d,len=%d,offset=%d"), i, len, offset);
     struct bio_private_data *p = bio->bi_private;
     if (i >= p->nr_pages) {
         pr_debug(pr_format("trying to add too much pages to bio block private data"));
@@ -87,10 +80,13 @@ static inline int __add_page(struct bio *bio, int i, struct page *page, unsigned
     p->iter[i].page = page;
     p->iter[i].len = len;
     p->iter[i].offset = offset;
-    pr_debug(pr_format("iter=%p,%d,%d"), p->iter[i].page, p->iter[i].offset, p->iter[i].len);
     return 0;
 }
 
+/**
+ * add_page adds pages to the read bio and its private data, the former needs the pages to write the data it reads from disk, the
+ * latter save the page content in the /snapshots directory.
+ */
 static inline int add_page(struct bio_vec *bvec, struct bio *bio, int i) {
     pr_debug(pr_format("bvec=(len=%d,off=%d,page=%p)"), bvec->bv_len, bvec->bv_offset, bvec->bv_page);
     struct page *page = alloc_page(GFP_KERNEL);
@@ -110,22 +106,17 @@ static int allocate_pages(struct bio *bio, struct bio *orig_bio) {
     int count = 0;
     int err = 0;
     struct bvec_iter old;
-    pr_debug(pr_format("before: (done=%d,idx=%d,sector=%llu,size=%d)"), orig_bio->bi_iter.bi_bvec_done, orig_bio->bi_iter.bi_idx, orig_bio->bi_iter.bi_sector, orig_bio->bi_iter.bi_size);
     memcpy(&old, &orig_bio->bi_iter, sizeof(struct bvec_iter));
     struct bio_vec bvec;
 	struct bvec_iter it;
     bio_for_each_bvec(bvec, orig_bio, it) {
-        pr_debug(pr_format("iter=(done=%d,idx=%d,sector=%llu,size=%d)"), it.bi_bvec_done, it.bi_idx, it.bi_sector, it.bi_size);
-        pr_debug(pr_format("bvec=(len=%d,off=%d,page=%p)"), bvec.bv_len, bvec.bv_offset, bvec.bv_page);
         int err = add_page(&bvec, bio, count);
         if (err) {
             goto allocate_pages_out;
         }
         ++count;
     }
-    pr_debug(pr_format("after: (done=%d,idx=%d,sector=%llu,size=%d)"), orig_bio->bi_iter.bi_bvec_done, orig_bio->bi_iter.bi_idx, orig_bio->bi_iter.bi_sector, orig_bio->bi_iter.bi_size);
     memcpy(&orig_bio->bi_iter, &old, sizeof(struct bvec_iter));
-    pr_debug(pr_format("restored: (done=%d,idx=%d,sector=%llu,size=%d)"), orig_bio->bi_iter.bi_bvec_done, orig_bio->bi_iter.bi_idx, orig_bio->bi_iter.bi_sector, orig_bio->bi_iter.bi_size);
     return err;
 
 allocate_pages_out:
@@ -150,7 +141,8 @@ static struct bio* create_read_bio(struct bio *orig_bio) {
     }
     data->orig_bio = orig_bio;
     data->nr_pages = orig_bio->bi_vcnt;
-    data->sector = bio_sector(orig_bio);
+    sector_t sector = bio_sector(orig_bio);
+    data->sector = sector;
     if (!data) {
         return NULL;
     }
@@ -159,7 +151,7 @@ static struct bio* create_read_bio(struct bio *orig_bio) {
         pr_debug(pr_format("bio_alloc failed"));
         goto no_bio;
     }
-    read_bio->bi_iter.bi_sector = bio_sector(orig_bio);
+    read_bio->bi_iter.bi_sector = sector;
     read_bio->bi_end_io = read_original_block_end_io;
     read_bio->bi_private = data;
     if (allocate_pages(read_bio, orig_bio)) {

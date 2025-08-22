@@ -310,14 +310,40 @@ int registry_add_sector(dev_t dev, sector_t sector, bool *added) {
             break;
         }
     }
-    *added = false;
+    if (added) {
+        *added = false;
+    }
     int err;
     if (!registered) {
         err = -ENOSSN;
         goto out;
     }
-    err = hashset_add(&s->hashset, dev, sector, added);
+    err = hashset_add(&s->hashset, sector, added);
 out:
+    rcu_read_unlock();
+    return err;
+}
+
+int registry_lookup_sector(dev_t dev, sector_t sector, bool *present) {
+    rcu_read_lock();
+    bool registered = false;
+    struct snapshot_metadata *it;
+    struct session *s = NULL;
+    list_for_each_entry_rcu(it, &registry_db, list) {
+        s = it->session.ptr;
+        registered = s && s->dev == dev;
+        if (registered) {
+            break;
+        }
+    }
+    *present = false;
+    int err;
+    if (!registered) {
+        err = -ENOSSN;
+    } else {
+        err = 0;
+        *present = hashset_lookup(&s->hashset, sector);
+    }
     rcu_read_unlock();
     return err;
 }
