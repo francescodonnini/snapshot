@@ -9,6 +9,6 @@ int snapshot_init(void);
 
 void snapshot_cleanup(void);
 
-int snapshot_save(struct bio *bio);
+void snapshot_save(struct bio *bio);
 
 #endif

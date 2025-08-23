@@ -67,9 +67,9 @@ static bool skip_handler(struct bio *bio) {
         return true;
     }
     if (present) {
-        pr_debug(pr_format("bio: dev=%d,%d, sector=%llu isn't in the block table"), MAJOR(devno), MINOR(devno), sector);
-    } else {
         pr_debug(pr_format("bio: dev=%d,%d, sector=%llu is already in the block table"), MAJOR(devno), MINOR(devno), sector);
+    } else {
+        pr_debug(pr_format("bio: dev=%d,%d, sector=%llu is not in the block table"), MAJOR(devno), MINOR(devno), sector);
     }
     return present;
 }

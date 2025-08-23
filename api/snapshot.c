@@ -19,7 +19,6 @@
 
 struct save_work {
     struct work_struct  work;
-    const char         *path;
     dev_t               devno;
     sector_t            sector;
     struct page_iter    iter;
@@ -112,21 +111,49 @@ snapshots_path_put:
     return err;
 }
 
+static inline char *ltoa(sector_t sector, char *buffer) {
+    sprintf(buffer, "%lld", sector);
+    return buffer;
+}
+
 static void save_page(struct work_struct *work) {
+    char *session = kzalloc(UUID_STRING_LEN + 1, GFP_KERNEL);
+    if (!session) {
+        goto no_session;
+    }
+    bool has_dir;
     struct save_work *w = container_of(work, struct save_work, work);
-    const char *path = w->path;
+    if (!registry_get_session_id(w->devno, session, &has_dir)) {
+        goto no_session;
+    }
+    char *parent = path_join_alloc("/snapshots", session);
+    if (!parent) {
+        goto no_parent;
+    }
+    if (!has_dir) {
+        if (mkdir_session(session)) {
+            goto no_parent;
+        } else {
+            registry_update_dir(w->devno, session);
+        }
+    }
+    char name[OCTET_SZ + 1] = {};
+    char *path = path_join_alloc(parent, ltoa(w->sector, name));
+    if (!path) {
+        goto no_path;
+    }
     struct page_iter *it = &w->iter;
     struct file *fp = filp_open(path, O_CREAT | O_WRONLY, 0664);
     if (IS_ERR(fp)) {
         pr_debug(pr_format("cannot open file: '%s', got error %ld"), path, PTR_ERR(fp));
-        goto save_page_out;
+        goto no_file;
     }
     loff_t off;
     void *va = kmap_local_page(it->page);
     pr_debug(pr_format("save page=%p,(%p),%d,%d"), va, it, it->offset, it->len);
     if (it->offset + it->len > PAGE_SIZE) {
         pr_debug(pr_format("out of page bound: [%d, %d)"), it->offset, it->len);
-        goto save_page_out;
+        goto no_file;
     }
     ssize_t n = kernel_write(fp, va + it->offset, it->len, &off);
     if (n != it->len) {
@@ -137,31 +164,24 @@ static void save_page(struct work_struct *work) {
     if (err) {
         pr_debug(pr_format("filp_close failed to close file at '%s', got error %d"), path, err);
     }
-save_page_out:
-    kfree(work);
+no_file:
     kfree(path);
+no_path:
+    kfree(parent);
+no_parent:
+    kfree(session);
+no_session:
+    kfree(work);
     __free_page(it->page);
 }
 
-static inline char *ltoa(sector_t sector, char *buffer) {
-    sprintf(buffer, "%lld", sector);
-    return buffer;
-}
-
-static int add_work(dev_t devno, sector_t sector, struct page_iter *it, const char *parent) {
-    char octet[OCTET_SZ + 1] = {0};
-    char *path = path_join_alloc(parent, ltoa(sector, octet));
-    if (!path) {
-        pr_debug(pr_format("cannot allocate enough space for path"));
-        return -ENOMEM;
-    }
+static int add_work(dev_t devno, sector_t sector, struct page_iter *it) {
     struct save_work *w;
     w = kzalloc(sizeof(*w), GFP_KERNEL);
     if (!w) {
-        pr_debug(pr_format("add_work failed for file='%s', sector=%llu"), path, sector);
+        pr_debug(pr_format("add_work failed for device=%d:%d, sector=%llu"), MAJOR(devno), MINOR(devno), sector);
         return -ENOMEM;
     }
-    w->path = path;
     memcpy(&w->iter, it, sizeof(*it));
     w->devno = devno;
     w->sector = sector;
@@ -169,59 +189,16 @@ static int add_work(dev_t devno, sector_t sector, struct page_iter *it, const ch
     return queue_work(queue, &w->work);
 }
 
-static void save_bio(struct bio_private_data *p, const char *parent) {
-    dev_t devno = p->orig_bio->bi_bdev->bd_dev;
-    sector_t sector = p->sector;
+void snapshot_save(struct bio *bio) {
+    dev_t dev = bio_devno(bio);
+    sector_t sector = bio_sector(bio);
+    struct bio_private_data *p = bio->bi_private;
     for (int i = 0; i < p->nr_pages; ++i) {
         struct page_iter *it = &p->iter[i];
-        int err = add_work(devno, sector, it, parent);
+        int err = add_work(dev, sector, it);
         if (err == -ENOMEM) {
             __free_page(it->page);
         }
         sector += it->len;
     }
-}
-
-static inline void free_bio_pages(struct bio_private_data *p) {
-    for (int i = 0; i < p->nr_pages; ++i) {
-        __free_page(p->iter[i].page);
-    }
-}
-
-int snapshot_save(struct bio *bio) {
-    int err = 0;
-    char *session = kzalloc(UUID_STRING_LEN + 1, GFP_KERNEL);
-    if (!session) {
-        pr_debug(pr_format("cannot make enough space to hold session id"));
-        err = -ENOMEM;
-        goto no_session;
-    }
-    bool has_dir;
-    bool found = registry_get_session_id(bio_devno(bio), session, &has_dir);
-    if (!found) {
-        pr_debug(pr_format("cannot find session associated with device %d,%d"), MAJOR(bio_devno(bio)), MINOR(bio_devno(bio)));
-        err = -EWRONGCRED;
-        goto free_session;
-    }
-    if (!has_dir) {
-        err = mkdir_session(session);
-        if (err) {
-            goto free_session;
-        }
-        registry_update_dir(bio_devno(bio), session);
-    }
-    char *parent = path_join_alloc(ROOT_DIR, session);
-    if (!parent) {
-        err = -ENOMEM;
-        goto free_session;
-    }
-    save_bio(bio->bi_private, session);
-    kfree(parent);
-free_session:
-    kfree(session);
-no_session:
-    if (err) {
-        free_bio_pages(bio->bi_private);
-    }
-    return err;
 }
