@@ -97,27 +97,34 @@ static int try_add(struct snapshot_metadata *ep) {
 }
 
 /**
- * total_size returns the size (in number of bytes) required by snapshot metadata. The space required is the number of bytes required by
- * a struct snapshot_metadata and the space required to store the device name and password hash. Those informations are stored in a contiguos
- * memory regione to minimize kmalloc invocations.
+ * helper function that initializes the pointer of password to the correct addresses.
  */
-static size_t total_size(size_t n) {
-    return sizeof(struct snapshot_metadata)
-        + ALIGN(n + 1, sizeof(void*))
-        + ALIGN(SHA1_HASH_LEN, sizeof(void*));
-}
-
-/**
- * helper function that initializes the pointers dev_name and password to the correct addresses.
- */
-static struct snapshot_metadata *node_alloc(size_t n, gfp_t gfp) {
+static inline struct snapshot_metadata *node_alloc_noname(gfp_t gfp) {
     struct snapshot_metadata *node;
-    node = kzalloc(total_size(n), gfp);
+    // size is the number of bytes needed by snapshot metadata + the number of bytes needed to hold the password hash
+    size_t size = sizeof(struct snapshot_metadata)
+                  + ALIGN(SHA1_HASH_LEN, sizeof(void*));
+    node = kzalloc(size, gfp);
     if (!node) {
         return NULL;
     }
-    node->dev_name = (char*)node + sizeof(*node);
-    node->password = node->dev_name + ALIGN(n + 1, sizeof(void*));
+    node->password = (char*)node + sizeof(*node);
+    return node;
+}
+
+static inline struct snapshot_metadata *node_alloc(const char *name, gfp_t gfp) {
+    struct snapshot_metadata *node = node_alloc_noname(gfp);
+    if (!node) {
+        return NULL;
+    }
+    size_t n = strlen(name) + 1;
+    node->dev_name = kzalloc(n, gfp);
+    if (!node->dev_name) {
+        kfree(node);
+        return NULL;
+    }
+    strscpy(node->dev_name, name, n);
+    node->dev_name_hash = fast_hash(name);
     return node;
 }
 
@@ -137,20 +144,19 @@ static struct snapshot_metadata* mk_node(const char *dev_name, const char *passw
         err = -ETOOBIG;
         goto no_node;
     }
-    struct snapshot_metadata *node = node_alloc(n, GFP_KERNEL);
+    struct snapshot_metadata *node = node_alloc(dev_name, GFP_KERNEL);
     if (node == NULL) {
         err = -ENOMEM;
         goto no_node;
     }
     err = hash("sha1", password, strlen(password), node->password, SHA1_HASH_LEN);
     if (err) {
-        goto free_node;
+        goto no_hash;
     }
-    node->dev_name_hash = fast_hash(dev_name);
-    strscpy(node->dev_name, dev_name, n + 1);
     return node;
 
-free_node:
+no_hash:
+    kfree(node->dev_name);
     kfree(node);
 no_node:
     return ERR_PTR(err);
@@ -174,28 +180,24 @@ int registry_insert(const char *dev_name, const char *password) {
     return err;
 }
 
+/**
+ * node_free_rcu release all the resources associated with a certain snapshot. It destroy a session and should be called only when a node
+ * is removed from the list (not updated).
+ */
 static void node_free_rcu(struct rcu_head *head) {
     struct snapshot_metadata *node = container_of(head, struct snapshot_metadata, rcu);
     struct session *s = node->session.ptr;
     if (s) {
         session_destroy(s);
     }
+    kfree(node->dev_name);
     kfree(node);
 }
 
 /**
- * check_password computes the hash of password and compares it to pw_hash, that is an already hashed password.
- * It returns true if the hashes match, false if they don't match or some error occurred while computing the
- * cryptographic hash of password (see hash/hash2 for further details).
+ * get_by_name search a node whose device name is equal to name. It assumes it's called inside
+ * a RCU critical section or a while a spinlock is held.
  */
-static bool check_password(const char *pw_hash, const char *password, char *buffer) {
-    int err = hash("sha1", password, strlen(password), buffer, SHA1_HASH_LEN);
-    if (err) {
-        return false;
-    }
-    return memcmp(pw_hash, buffer, SHA1_HASH_LEN) == 0;
-}
-
 static inline struct snapshot_metadata *get_by_name(const char *name) {
     unsigned long name_hash = fast_hash(name);
     struct snapshot_metadata *it;
@@ -207,6 +209,10 @@ static inline struct snapshot_metadata *get_by_name(const char *name) {
     return NULL;
 }
 
+/**
+ * get_by_dev search a node whose device number is equal to dev. It assumes it's called inside
+ * a RCU critical section or a while a spinlock is held.
+ */
 static inline struct snapshot_metadata *get_by_dev(dev_t dev) {
     struct snapshot_metadata *it;
     list_for_each_entry_rcu(it, &registry_db, list) {
@@ -226,19 +232,21 @@ static inline struct snapshot_metadata *get_by_dev(dev_t dev) {
  * @return -EWRONGCRED if the password or the device name are wrong, 0 otherwise 
  */
 int registry_delete(const char *dev_name, const char *password) {
-    char *buffer = kmalloc(SHA1_HASH_LEN, GFP_KERNEL);
-    if (!buffer) {
-        return -ENOMEM;
+    char *buffer = hash_alloc("SHA1", password, strlen(password));
+    if (IS_ERR(buffer)) {
+        return PTR_ERR(buffer);
     }
+
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
     struct snapshot_metadata *it = get_by_name(dev_name);
     int err = -EWRONGCRED;
-    if (it && check_password(it->password, password, buffer)) {
+    if (it && !memcmp(buffer, it->password, SHA1_HASH_LEN)) {
         list_del_rcu(&it->list);
         err = 0;
     }
     spin_unlock_irqrestore(&write_lock, flags);
+    
     kfree(buffer);
     if (!err) {
         call_rcu(&it->rcu, node_free_rcu);
@@ -256,21 +264,19 @@ bool registry_lookup_active(dev_t dev) {
     return registry_lookup_rcu(is_active, (void*)&dev);
 }
 
-static inline void node_copy(struct snapshot_metadata *dst, struct snapshot_metadata *src) {
-    memcpy(dst->dev_name, src->dev_name, strlen(src->dev_name) + 1);
-    dst->dev_name_hash = src->dev_name_hash;
-    memcpy(dst->password, src->password, SHA1_HASH_LEN);
-    dst->session.ptr = src->session.ptr;
+static void create_session_rcu(struct rcu_head *head) {
+    struct snapshot_metadata *node = container_of(head, struct snapshot_metadata, rcu);
+    kfree(node);
 }
 
 /**
- * registry_update updates a previously registered image/device with the associated device number
+ * registry_create_session updates a previously registered image/device with the associated device number
  * @param dev_name - the path of the image associated with the device
  * @param dev      - the device number associated to the device
  * @returns 0 on success, <0 otherwise.
  */
-int registry_update(const char *dev_name, dev_t dev) {
-    struct snapshot_metadata *new_node = node_alloc(strlen(dev_name), GFP_ATOMIC);
+int registry_create_session(const char *dev_name, dev_t dev) {
+    struct snapshot_metadata *new_node = node_alloc_noname(GFP_KERNEL);
     if (!new_node) {
         return -ENOMEM;
     }
@@ -280,6 +286,8 @@ int registry_update(const char *dev_name, dev_t dev) {
         err = -ENOMEM;
         goto no_session;
     }
+    new_node->session.ptr = session;
+    
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
     struct snapshot_metadata *old_node = get_by_name(dev_name);
@@ -288,22 +296,32 @@ int registry_update(const char *dev_name, dev_t dev) {
         err = -EWRONGCRED;
         goto wrong_credentials;
     }
-    node_copy(new_node, old_node);
-    new_node->session.ptr = session;
-    pr_debug(pr_format("device=%s;dev=%d,%d;uuid=%s"),
-    dev_name, MAJOR(session->dev), MINOR(session->dev), session->id);
+
+    new_node->dev_name = old_node->dev_name;
+    new_node->dev_name_hash = old_node->dev_name_hash;
+    memcpy(new_node->password, old_node->password, SHA1_HASH_LEN);
+
+    pr_debug(pr_format("device=%s;dev=%d,%d;uuid=%s"), dev_name, MAJOR(session->dev), MINOR(session->dev), session->id);
+    
     list_replace_rcu(&old_node->list, &new_node->list);
     spin_unlock_irqrestore(&write_lock, flags);
-    call_rcu(&old_node->rcu, node_free_rcu);
+    
+    call_rcu(&old_node->rcu, create_session_rcu);
     return err;
 
 wrong_credentials:
     spin_unlock_irqrestore(&write_lock, flags);
 no_session:
+    kfree(new_node->dev_name);
     kfree(new_node);
     return err;
 }
 
+/**
+ * registry_add_sector adds a sector to a session associate to a device number dev. The parameter added is optional
+ * and if it's not NULL, then registry_add_sector writes false to it if the sector wasn't previously registered in the
+ * corresponding hashset.
+ */
 int registry_add_sector(dev_t dev, sector_t sector, bool *added) {
     rcu_read_lock();
     bool registered = false;
@@ -316,13 +334,13 @@ int registry_add_sector(dev_t dev, sector_t sector, bool *added) {
             break;
         }
     }
-    if (added) {
-        *added = false;
-    }
     int err;
     if (!registered) {
         err = -ENOSSN;
         goto out;
+    }
+    if (added) {
+        *added = false;
     }
     err = hashset_add(&s->hashset, sector, added);
 out:
@@ -371,7 +389,26 @@ bool registry_get_session_id(dev_t dev, char *id, bool *has_dir) {
     return found;
 }
 
+static void end_session_rcu(struct rcu_head *head) {
+    struct snapshot_metadata *node = container_of(head, struct snapshot_metadata, rcu);
+    struct session *s = node->session.ptr;
+    if (s) {
+        session_destroy(s);
+    }
+    kfree(node);
+}
+
+/**
+ * registry_end_session detaches the current session from the node associated
+ * to the device number dev.
+ */
 void registry_end_session(dev_t dev) {
+    struct snapshot_metadata *new_node = node_alloc_noname(GFP_KERNEL);
+    if (!new_node) {
+        pr_debug(pr_format("out of memory"));
+        return;
+    }
+
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
     bool found = false;
@@ -383,24 +420,26 @@ void registry_end_session(dev_t dev) {
             break;
         }
     }
+
     int err = 0;
     if (!found) {
         err = -ENOSSN;
         goto no_session;
     }
-    struct snapshot_metadata *new_node = node_alloc(strlen(it->dev_name), GFP_ATOMIC);
-    if (!new_node) {
-        err = -ENOMEM;
-        goto no_session;
-    }
-    node_copy(new_node, it);
+    
+    new_node->dev_name = it->dev_name;
+    new_node->dev_name_hash = it->dev_name_hash;
+    memcpy(new_node->password, it->password, SHA1_HASH_LEN);
+    new_node->session.ptr = NULL;
+
     list_replace_rcu(&it->list, &new_node->list);
+
 no_session:
     spin_unlock_irqrestore(&write_lock, flags);
     if (err) {
         kfree(new_node);
     } else {
-        call_rcu(&it->rcu, node_free_rcu);
+        call_rcu(&it->rcu, end_session_rcu);
     }
 }
 
@@ -413,6 +452,14 @@ static inline ssize_t length(struct snapshot_metadata *it) {
     return n;
 }
 
+/**
+ * registry_show_session prints into buf the active sessions in the format:
+ * <device name>: /snapshots/<session id>
+ *
+ * Currently the buffer is guaranteed to be a page (e.g. of 4K), so it might be not possible to 
+ * print all the currently active sessions to the buffer, in this case the buffer can be terminated with
+ * EOF (if there is enough space to hold "EOF").
+ */
 ssize_t registry_show_session(char *buf, size_t size) {
     rcu_read_lock();
     int err = 0;
@@ -420,7 +467,6 @@ ssize_t registry_show_session(char *buf, size_t size) {
     struct snapshot_metadata *it;
     list_for_each_entry_rcu(it, &registry_db, list) {
         ssize_t n = length(it);
-        pr_debug(pr_format("%s (%ld bytes)"), it->dev_name, length(it));
         if (br + n >= size) {
             err = -1;
             break;
@@ -435,38 +481,53 @@ ssize_t registry_show_session(char *buf, size_t size) {
     }
     rcu_read_unlock();
     if (err) {
-        if (br + strlen("EOF\n") < size) {
-            br += sprintf(&buf[br], "EOF\n");
+        if (br + strlen("EOF") < size) {
+            br += sprintf(&buf[br], "EOF");
         }
     }
     return br;
 }
 
+static void node_update_rcu(struct rcu_head *head) {
+    struct snapshot_metadata *node = container_of(head, struct snapshot_metadata, rcu);
+    kfree(node);
+}
+
+/**
+ * registry_update_dir updates the current session associated to the device number dev writing that
+ * the current active session has finally a directory where to write the blocks
+ */
 void registry_update_dir(dev_t dev, const char *session) {
+    // we cannot update the node without make another allocation
+    struct snapshot_metadata *new_node = node_alloc_noname(GFP_KERNEL);
+    if (!new_node) {
+        pr_debug(pr_format("out of memory"));
+        return;
+    }
+
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
     struct snapshot_metadata *old_node = get_by_dev(dev);
+    int err = 0;
     if (!old_node) {
-        pr_debug(pr_format("cannot find device with major,minor=%d,%d"), MAJOR(dev), MINOR(dev));
-        goto no_node;
+        err = -ENOSSN;
+        goto release_lock;
     }
+
+    new_node->dev_name = old_node->dev_name;
+    new_node->dev_name_hash = old_node->dev_name_hash;
+    memcpy(new_node->password, old_node->password, SHA1_HASH_LEN);
     struct session *s = old_node->session.ptr;
     if (!s) {
-        pr_debug(pr_format("no session associated with device major,minor=%d,%d"), MAJOR(dev), MINOR(dev));
-        goto no_node;
-    }
-    struct snapshot_metadata *new_node = node_alloc(strlen(old_node->dev_name), GFP_KERNEL);
-    if (!new_node) {
-        pr_debug(pr_format("node_alloc failed, out of memory"));
-        goto no_node;
+        pr_debug(pr_format("no session associated with device %s"), old_node->dev_name);
+        goto release_lock;
     }
     s->has_dir = true;
-    node_copy(new_node, old_node);
-    list_replace_rcu(&old_node->list, &new_node->list);
-    spin_unlock_irqrestore(&write_lock, flags);
-    call_rcu(&old_node->rcu, node_free_rcu);
-    return;
+    new_node->session.ptr = s;
 
-no_node:
+    list_replace_rcu(&old_node->list, &new_node->list);
+
+release_lock:
     spin_unlock_irqrestore(&write_lock, flags);
+    call_rcu(&old_node->rcu, node_update_rcu);
 }

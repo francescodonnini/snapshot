@@ -32,7 +32,7 @@ int registry_delete(const char *dev_name, const char *password);
 
 bool registry_lookup_active(dev_t dev);
 
-int registry_update(const char *dev_name, dev_t dev);
+int registry_create_session(const char *dev_name, dev_t dev);
 
 void registry_update_dir(dev_t dev, const char *session);
 
