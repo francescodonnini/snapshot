@@ -1,6 +1,7 @@
 #include "chrdev_ioctl.h"
 #include "chrdev.h"
 #include "pr_format.h"
+#include "registry.h"
 #include <linux/cdev.h>
 #include <linux/device/class.h>
 #include <linux/init.h>
@@ -8,14 +9,15 @@
 #include <linux/kobject.h>
 #include <linux/uaccess.h>
 
-#define MY_CHRDEV_NAME  "chrdev_snapshot"
-#define MY_CHRDEV_CLASS "chrdev_cls_snapshot"
-#define MY_CHRDEV_MNT   "snapshot_test"
+#define MY_CHRDEV_NAME  "blkdev_snapshot"
+#define MY_CHRDEV_CLASS "blkdev_snapshot_class"
+#define MY_CHRDEV_MNT   "blkdev_snapshot_device"
 
 struct chrdev {
-    dev_t        dev;
-    struct cdev  cdev;
-    struct class *class;
+    dev_t           dev;
+    struct cdev     cdev;
+    struct class   *class;
+    struct kobject *kobj;
 };
 
 static struct chrdev device;
@@ -29,6 +31,12 @@ static int my_uevent(const struct device *dev, __attribute__((unused)) struct ko
     add_uevent_var(env, "DEVMODE=%#o", 0440);
     return 0;
 }
+
+static ssize_t session_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf) {
+    return registry_show_session(buf, PAGE_SIZE - 1);
+}
+
+static struct kobj_attribute session_attribute = __ATTR(active, 0664, session_show, NULL);
 
 /**
  * chrdev_init - create a device to handle ioctl operations from user space.
@@ -61,8 +69,24 @@ int chrdev_init(void) {
         pr_debug(pr_format("cannot create device /dev/%s because of error %d\n"), MY_CHRDEV_MNT, err);
         goto no_device;
     }
+
+    device.kobj = kobject_create_and_add("sessions", kernel_kobj);
+    if (!device.kobj) {
+        pr_debug(pr_format("cannot create kobject '%s'"), "sessions");
+        goto no_kobj;
+    }
+    
+    err = sysfs_create_file(device.kobj, &session_attribute.attr);
+    if (err) {
+        pr_debug(pr_format("cannot create attribute '%s'"), session_attribute.attr.name);
+        goto no_attr;
+    }
     return 0;
 
+no_attr:
+    kobject_put(device.kobj);
+no_kobj:
+    device_destroy(device.class, device.dev);
 no_device:
     class_destroy(device.class);
 no_cdev_class:
@@ -73,6 +97,8 @@ no_cdev_add:
 }
 
 void chrdev_cleanup(void) {
+    sysfs_remove_file(device.kobj, &session_attribute.attr);
+    kobject_put(device.kobj);
     device_destroy(device.class, device.dev);
     class_destroy(device.class);
     cdev_del(&device.cdev);

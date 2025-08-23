@@ -20,9 +20,9 @@
 struct save_work {
     struct work_struct  work;
     const char         *path;
-    struct page_iter    iter;
     dev_t               devno;
     sector_t            sector;
+    struct page_iter    iter;
 };
 
 static struct workqueue_struct *queue;
@@ -112,17 +112,6 @@ snapshots_path_put:
     return err;
 }
 
-/**
- * snapshot_create -- registers a new snapshot session.
- * @param snapshot -- unique identifier of the session
- * @param dev      -- device number of the block device registered by the activate snapshot
- *                    command
- * @returns 0 on success, <0 otherwise.
- */
-int snapshot_create(const char *session) {
-    return mkdir_session(session);
-}
-
 static void save_page(struct work_struct *work) {
     struct save_work *w = container_of(work, struct save_work, work);
     const char *path = w->path;
@@ -181,7 +170,6 @@ static int add_work(dev_t devno, sector_t sector, struct page_iter *it, const ch
     memcpy(&w->iter, it, sizeof(*it));
     w->devno = devno;
     w->sector = sector;
-    pr_debug(pr_format("iter(%p)=%p,%d,%d"), it, it->page, it->offset, it->len);
     INIT_WORK(&w->work, save_page);
     return queue_work(queue, &w->work);
 }
@@ -213,18 +201,26 @@ int snapshot_save(struct bio *bio) {
         err = -ENOMEM;
         goto no_session;
     }
-    bool found = registry_get_session_id(bio_devno(bio), session);
+    bool has_dir;
+    bool found = registry_get_session_id(bio_devno(bio), session, &has_dir);
     if (!found) {
         pr_debug(pr_format("cannot find session associated with device %d,%d"), MAJOR(bio_devno(bio)), MINOR(bio_devno(bio)));
         err = -EWRONGCRED;
         goto free_session;
+    }
+    if (!has_dir) {
+        err = mkdir_session(session);
+        if (err) {
+            goto free_session;
+        }
+        registry_update_dir(bio_devno(bio), session);
     }
     char *parent = path_join_alloc(ROOT_DIR, session);
     if (!parent) {
         err = -ENOMEM;
         goto free_session;
     }
-    save_bio(bio->bi_private, parent);
+    save_bio(bio->bi_private, session);
     kfree(parent);
 free_session:
     kfree(session);

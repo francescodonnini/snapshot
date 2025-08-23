@@ -21,7 +21,7 @@ static inline int try_update_loop_dev(struct block_device *bdev, char *buf) {
  * (see registry_update for more details).
  */
 static int registry_update_loop_device(struct block_device *bdev) {
-    char *buf = kmalloc(PATH_MAX, GFP_KERNEL);
+    char *buf = kmalloc(PATH_MAX, GFP_ATOMIC);
     if (!buf) {
         return -ENOMEM;
     }

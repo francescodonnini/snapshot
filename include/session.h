@@ -6,6 +6,7 @@ struct session {
     dev_t           dev;
     char           *id;
     struct hashset  hashset;
+    bool            has_dir;
 };
 
 struct session *session_create(dev_t dev);

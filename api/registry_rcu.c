@@ -110,9 +110,9 @@ static size_t total_size(size_t n) {
 /**
  * helper function that initializes the pointers dev_name and password to the correct addresses.
  */
-static struct snapshot_metadata *node_alloc(size_t n) {
+static struct snapshot_metadata *node_alloc(size_t n, gfp_t gfp) {
     struct snapshot_metadata *node;
-    node = kzalloc(total_size(n), GFP_KERNEL);
+    node = kzalloc(total_size(n), gfp);
     if (!node) {
         return NULL;
     }
@@ -137,7 +137,7 @@ static struct snapshot_metadata* mk_node(const char *dev_name, const char *passw
         err = -ETOOBIG;
         goto no_node;
     }
-    struct snapshot_metadata *node = node_alloc(n);
+    struct snapshot_metadata *node = node_alloc(n, GFP_KERNEL);
     if (node == NULL) {
         err = -ENOMEM;
         goto no_node;
@@ -200,13 +200,24 @@ static inline struct snapshot_metadata *get_by_name(const char *name) {
     unsigned long name_hash = fast_hash(name);
     struct snapshot_metadata *it;
     list_for_each_entry_rcu(it, &registry_db, list) {
-        bool b = name_hash == it->dev_name_hash && !strcmp(name, it->dev_name);
-        if (b) {
+        if (name_hash == it->dev_name_hash && !strcmp(name, it->dev_name)) {
             return it;
         }
     }
     return NULL;
 }
+
+static inline struct snapshot_metadata *get_by_dev(dev_t dev) {
+    struct snapshot_metadata *it;
+    list_for_each_entry_rcu(it, &registry_db, list) {
+        struct session *s = it->session.ptr;
+        if (s && s->dev == dev) {
+            return it;
+        }
+    }
+    return NULL;
+}
+
 
 /**
  * registry_delete deletes the credentials associated with the block-device dev_name
@@ -249,6 +260,7 @@ static inline void node_copy(struct snapshot_metadata *dst, struct snapshot_meta
     memcpy(dst->dev_name, src->dev_name, strlen(src->dev_name) + 1);
     dst->dev_name_hash = src->dev_name_hash;
     memcpy(dst->password, src->password, SHA1_HASH_LEN);
+    dst->session.ptr = src->session.ptr;
 }
 
 /**
@@ -258,7 +270,7 @@ static inline void node_copy(struct snapshot_metadata *dst, struct snapshot_meta
  * @returns 0 on success, <0 otherwise.
  */
 int registry_update(const char *dev_name, dev_t dev) {
-    struct snapshot_metadata *new_node = node_alloc(strlen(dev_name));
+    struct snapshot_metadata *new_node = node_alloc(strlen(dev_name), GFP_ATOMIC);
     if (!new_node) {
         return -ENOMEM;
     }
@@ -267,10 +279,6 @@ int registry_update(const char *dev_name, dev_t dev) {
     if (!session) {
         err = -ENOMEM;
         goto no_session;
-    }
-    err = snapshot_create(session->id);
-    if (err) {
-        goto no_directory;
     }
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
@@ -291,8 +299,6 @@ int registry_update(const char *dev_name, dev_t dev) {
 
 wrong_credentials:
     spin_unlock_irqrestore(&write_lock, flags);
-no_directory:
-    session_destroy(session);
 no_session:
     kfree(new_node);
     return err;
@@ -348,7 +354,7 @@ int registry_lookup_sector(dev_t dev, sector_t sector, bool *present) {
     return err;
 }
 
-bool registry_get_session_id(dev_t dev, char *id) {
+bool registry_get_session_id(dev_t dev, char *id, bool *has_dir) {
     rcu_read_lock();
     bool found = false;
     struct snapshot_metadata *it;
@@ -357,6 +363,7 @@ bool registry_get_session_id(dev_t dev, char *id) {
         found = s && s->dev == dev;
         if (found) {
             strncpy(id, s->id, UUID_STRING_LEN + 1);
+            *has_dir = s->has_dir;
             break;
         }
     }
@@ -381,7 +388,7 @@ void registry_end_session(dev_t dev) {
         err = -ENOSSN;
         goto no_session;
     }
-    struct snapshot_metadata *new_node = node_alloc(strlen(it->dev_name));
+    struct snapshot_metadata *new_node = node_alloc(strlen(it->dev_name), GFP_ATOMIC);
     if (!new_node) {
         err = -ENOMEM;
         goto no_session;
@@ -395,4 +402,65 @@ no_session:
     } else {
         call_rcu(&it->rcu, node_free_rcu);
     }
+}
+
+static size_t length(struct snapshot_metadata *it) {
+    size_t n = strlen(it->dev_name);
+    struct session *s = it->session.ptr;
+    if (s) {
+        n += strlen(s->id);
+    }
+    return n;
+}
+
+int registry_show_session(char *buf, size_t size) {
+    rcu_read_lock();
+    int err = 0;
+    size_t br = 0;
+    struct snapshot_metadata *it;
+    list_for_each_entry_rcu(it, &registry_db, list) {
+        size_t n = length(it);
+        if (br + n >= size - strlen("(INTERRUPTED)\n")) {
+            sprintf(buf, "%s\n", "(INTERRUPTED)");
+            err = -1;
+            break;
+        }
+        br += sprintf(buf, "%s: ", it->dev_name);
+        struct session *s = it->session.ptr;
+        if (s) {
+            br += sprintf(buf, "/snapshots/%s\n", s->id);
+        } else {
+            br += sprintf(buf, "-\n");
+        }
+    }
+    rcu_read_unlock();
+    return err;
+}
+
+void registry_update_dir(dev_t dev, const char *session) {
+    unsigned long flags;
+    spin_lock_irqsave(&write_lock, flags);
+    struct snapshot_metadata *old_node = get_by_dev(dev);
+    if (!old_node) {
+        pr_debug(pr_format("cannot find device with major,minor=%d,%d"), MAJOR(dev), MINOR(dev));
+        goto no_node;
+    }
+    struct session *s = old_node->session.ptr;
+    if (!s) {
+        pr_debug(pr_format("no session associated with device major,minor=%d,%d"), MAJOR(dev), MINOR(dev));
+        goto no_node;
+    }
+    struct snapshot_metadata *new_node = node_alloc(strlen(old_node->dev_name), GFP_KERNEL);
+    if (!new_node) {
+        pr_debug(pr_format("node_alloc failed, out of memory"));
+        goto no_node;
+    }
+    s->has_dir = true;
+    node_copy(new_node, old_node);
+    list_replace_rcu(&old_node->list, &new_node->list);
+    spin_unlock_irqrestore(&write_lock, flags);
+    call_rcu(&old_node->rcu, node_free_rcu);
+
+no_node:
+    spin_unlock_irqrestore(&write_lock, flags);
 }

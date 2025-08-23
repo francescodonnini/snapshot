@@ -9,8 +9,6 @@ int snapshot_init(void);
 
 void snapshot_cleanup(void);
 
-int snapshot_create(const char *session);
-
 int snapshot_save(struct bio *bio);
 
 #endif

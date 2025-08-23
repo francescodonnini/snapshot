@@ -17,7 +17,7 @@ static int gen_uuid(char *out, size_t n) {
 struct session *session_create(dev_t dev) {
     struct session *s;
     size_t size = sizeof(*s) + ALIGN(UUID_STRING_LEN + 1, sizeof(void*));
-    s = kzalloc(size, GFP_KERNEL);
+    s = kzalloc(size, GFP_ATOMIC);
     if (!s) {
         return NULL;
     }
@@ -30,6 +30,7 @@ struct session *session_create(dev_t dev) {
         goto session_create_out;
     }
     s->dev = dev;
+    s->has_dir = false;
     return s;
 
 session_create_out:
