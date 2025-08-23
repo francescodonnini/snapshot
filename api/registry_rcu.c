@@ -404,7 +404,7 @@ no_session:
     }
 }
 
-static size_t length(struct snapshot_metadata *it) {
+static inline ssize_t length(struct snapshot_metadata *it) {
     size_t n = strlen(it->dev_name);
     struct session *s = it->session.ptr;
     if (s) {
@@ -413,28 +413,33 @@ static size_t length(struct snapshot_metadata *it) {
     return n;
 }
 
-int registry_show_session(char *buf, size_t size) {
+ssize_t registry_show_session(char *buf, size_t size) {
     rcu_read_lock();
     int err = 0;
-    size_t br = 0;
+    ssize_t br = 0;
     struct snapshot_metadata *it;
     list_for_each_entry_rcu(it, &registry_db, list) {
-        size_t n = length(it);
-        if (br + n >= size - strlen("(INTERRUPTED)\n")) {
-            sprintf(buf, "%s\n", "(INTERRUPTED)");
+        ssize_t n = length(it);
+        pr_debug(pr_format("%s (%ld bytes)"), it->dev_name, length(it));
+        if (br + n >= size) {
             err = -1;
             break;
         }
-        br += sprintf(buf, "%s: ", it->dev_name);
+        br += sprintf(&buf[br], "%s: ", it->dev_name);
         struct session *s = it->session.ptr;
         if (s) {
-            br += sprintf(buf, "/snapshots/%s\n", s->id);
+            br += sprintf(&buf[br], "/snapshots/%s\n", s->id);
         } else {
-            br += sprintf(buf, "-\n");
+            br += sprintf(&buf[br], "-\n");
         }
     }
     rcu_read_unlock();
-    return err;
+    if (err) {
+        if (br + strlen("EOF\n") < size) {
+            br += sprintf(&buf[br], "EOF\n");
+        }
+    }
+    return br;
 }
 
 void registry_update_dir(dev_t dev, const char *session) {

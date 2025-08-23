@@ -36,7 +36,7 @@ static ssize_t session_show(struct kobject *kobj, struct kobj_attribute *attr, c
     return registry_show_session(buf, PAGE_SIZE - 1);
 }
 
-static struct kobj_attribute session_attribute = __ATTR(active, 0664, session_show, NULL);
+static struct kobj_attribute session_attribute = __ATTR(active, 0440, session_show, NULL);
 
 /**
  * chrdev_init - create a device to handle ioctl operations from user space.

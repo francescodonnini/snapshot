@@ -22,7 +22,7 @@ int registry_add_sector(dev_t dev, sector_t sector, bool *added);
 
 int registry_lookup_sector(dev_t dev, sector_t sector, bool *present);
 
-int registry_show_session(char *buf, size_t size);
+ssize_t registry_show_session(char *buf, size_t size);
 
 bool registry_get_session_id(dev_t dev, char *id, bool *has_dir);
 
