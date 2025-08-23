@@ -137,11 +137,6 @@ static void save_page(struct work_struct *work) {
     if (err) {
         pr_debug(pr_format("filp_close failed to close file at '%s', got error %d"), path, err);
     }
-    // Only at this point a write bio request can avoid the slow path
-    err = registry_add_sector(w->devno, w->sector, NULL);
-    if (err) {
-        pr_debug(pr_format("registry_add_sector failed to add pair (%d, %llu), got error %d"), w->devno, w->sector, err);
-    }
 save_page_out:
     kfree(work);
     kfree(path);

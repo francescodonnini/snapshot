@@ -465,6 +465,7 @@ void registry_update_dir(dev_t dev, const char *session) {
     list_replace_rcu(&old_node->list, &new_node->list);
     spin_unlock_irqrestore(&write_lock, flags);
     call_rcu(&old_node->rcu, node_free_rcu);
+    return;
 
 no_node:
     spin_unlock_irqrestore(&write_lock, flags);

@@ -1,6 +1,7 @@
 #include "bio.h"
 #include "bio_utils.h"
 #include "pr_format.h"
+#include "registry.h"
 #include "snapshot.h"
 #include <linux/bio.h>
 #include <linux/bvec.h>
@@ -55,16 +56,24 @@ static void dbg_dump_read_bio(const char *prefix, struct bio *bio) {
 static void read_original_block_end_io(struct bio *bio) {
     if (bio->bi_status == BLK_STS_OK) {
         int err = snapshot_save(bio);
+        dev_t devno = bio_devno(bio);
+        sector_t sector = bio_sector(bio);
         if (err) {
             pr_debug(
                 pr_format("snapshot_save %llu failed for device %d,%d, got error %d"),
-                bio->bi_iter.bi_sector,
-                MAJOR(bio->bi_bdev->bd_dev), MINOR(bio->bi_bdev->bd_dev),
+                sector,
+                MAJOR(devno), MINOR(devno),
                 err);
+        }
+        // Only at this point a write bio request can avoid the slow path
+        err = registry_add_sector(devno, sector, NULL);
+        if (err) {
+            pr_debug(pr_format("registry_add_sector failed to add pair (%d, %llu), got error %d"), devno, sector, err);
         }
     } else {
         pr_debug(pr_format("bio completed with error %d"), bio->bi_status);
     }
+
     struct bio_private_data *p = bio->bi_private;
     submit_bio(p->orig_bio);
     kfree(p);
