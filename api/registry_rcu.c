@@ -292,9 +292,13 @@ int registry_create_session(const char *dev_name, dev_t dev) {
     spin_lock_irqsave(&write_lock, flags);
     struct snapshot_metadata *old_node = get_by_name(dev_name);
     if (!old_node) {
-        pr_debug(pr_format("cannot find device=%s"), dev_name);
+        pr_debug(pr_format("cannot find device='%s'"), dev_name);
         err = -EWRONGCRED;
-        goto wrong_credentials;
+        goto release_lock;
+    } else if (old_node->session.ptr) {
+        pr_debug(pr_format("a session associated to device '%s' is currently active"), dev_name);
+        err = 0;
+        goto release_lock;
     }
 
     new_node->dev_name = old_node->dev_name;
@@ -309,7 +313,7 @@ int registry_create_session(const char *dev_name, dev_t dev) {
     call_rcu(&old_node->rcu, create_session_rcu);
     return err;
 
-wrong_credentials:
+release_lock:
     spin_unlock_irqrestore(&write_lock, flags);
 no_session:
     kfree(new_node->dev_name);

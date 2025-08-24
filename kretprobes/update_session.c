@@ -31,7 +31,6 @@ static int registry_update_loop_device(struct block_device *bdev) {
 }
 
 void update_session(const char *dev_name, struct block_device *bdev) {
-    pr_debug(pr_format("update_session(%s, %p)"), dev_name, bdev);
     int err;
     if (is_loop_device(bdev)) {
         err = registry_update_loop_device(bdev);
@@ -40,7 +39,5 @@ void update_session(const char *dev_name, struct block_device *bdev) {
     }
     if (err) {
         pr_debug(pr_format("cannot update device major=%d,minor=%d, got error %d"), MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev), err);
-    } else {
-        pr_debug(pr_format("device '%s' updated successfully with major=%d,minor=%d"), dev_name, MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev));
     }
 }
