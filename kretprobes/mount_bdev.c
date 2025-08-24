@@ -23,6 +23,23 @@ int mount_bdev_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
     return 0;
 }
 
+static inline int get_bdev_safe(struct dentry *dentry, struct block_device **bdev) {
+    if (!dentry) {
+        pr_debug(pr_format("fs_context is NULL"));
+        return -1;
+    }
+    if (!dentry->d_sb) {
+        pr_debug(pr_format("root is NULL"));
+        return -1;
+    }
+    if (!dentry->d_sb->s_bdev) {
+        pr_debug(pr_format("block device is NULL"));
+        return -1;
+    }
+    *bdev = dentry->d_sb->s_bdev;
+    return 0;
+}
+
 /**
  * mount_bdev_handler checks whether mount_bdev completed successfully, then it registers
  * the device number (MAJOR, minor) in the registry if the block device just mounted was previously
@@ -32,15 +49,12 @@ int mount_bdev_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
 int mount_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     struct dentry *dentry = get_rval(struct dentry*, regs);
     if (IS_ERR(dentry)) {
-        pr_debug(pr_format("mount_bdev failed with error: %ld"), PTR_ERR(dentry));
+        pr_debug(pr_format("failed with error: %ld"), PTR_ERR(dentry));
         return 0;
     }
     struct mount_bdev_data *data = (struct mount_bdev_data*)kp->data;
-    struct block_device *bdev = dentry->d_sb->s_bdev;
-    if (registry_lookup_active(bdev->bd_dev)) {
-        pr_debug(pr_format("device %s with device number (%d, %d) does not exist or is already registered"),
-                 data->dev_name, MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev));
-    } else {
+    struct block_device *bdev;
+    if (!get_bdev_safe(dentry, &bdev)) {
         update_session(data->dev_name, bdev);
     }
     return 0;

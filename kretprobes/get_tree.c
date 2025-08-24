@@ -11,7 +11,6 @@ int get_tree_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs) 
     }
     struct get_tree_data *data = (struct get_tree_data*)kp->data;
     data->fc = fc;
-    pr_debug(pr_format("fs-type=%s,source=%s"), fc->fs_type->name, fc->source);
     return 0;
 }
 
@@ -36,22 +35,17 @@ static inline int get_bdev_safe(struct fs_context *fc, struct block_device **bde
     return 0;
 }
 
-static inline void __update_session(struct fs_context *fc) {
-    struct block_device *bdev;
-    if (get_bdev_safe(fc, &bdev)) {
-        return;
-    }
-    update_session(fc->source, bdev);
-}
-
 int get_tree_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     int err = get_rval(int, regs);
     if (err) {
-        pr_debug(pr_format("completed with error %d"), err);
+        pr_debug(pr_format("failed with error %d"), err);
         return 0;
     }
     struct get_tree_data *data = (struct get_tree_data*)kp->data;
     struct fs_context *fc = data->fc;
-    __update_session(fc);
+    struct block_device *bdev;
+    if (!get_bdev_safe(fc, &bdev)) {
+        update_session(fc->source, bdev);
+    }
     return 0;
 }

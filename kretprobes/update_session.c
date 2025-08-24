@@ -31,6 +31,7 @@ static int registry_update_loop_device(struct block_device *bdev) {
 }
 
 void update_session(const char *dev_name, struct block_device *bdev) {
+    pr_debug(pr_format("update_session(%s, %p)"), dev_name, bdev);
     int err;
     if (is_loop_device(bdev)) {
         err = registry_update_loop_device(bdev);
