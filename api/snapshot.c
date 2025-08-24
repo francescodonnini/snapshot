@@ -12,6 +12,7 @@
 #include <linux/list.h>
 #include <linux/path.h>
 #include <linux/printk.h>
+#include <linux/sprintf.h>
 #include <linux/workqueue.h>
 
 #define OCTET_SZ (16)
@@ -88,32 +89,42 @@ static int mkdir_session(const char *session) {
     struct path parent;
     int err = kern_path(ROOT_DIR, LOOKUP_DIRECTORY, &parent);
     if (err) {
-        pr_debug(pr_format("'%s' does not exists, got error %d (%s)"), ROOT_DIR, err, errtoa(err));
+        pr_debug(pr_format("'%s' does not exists, got error %d (%s)"),
+                 ROOT_DIR, err, errtoa(err));
         return err;
     }
+
     struct inode *parent_ino = d_inode(parent.dentry);
     inode_lock(parent_ino);
     struct dentry *dentry = lookup_one_len(session, parent.dentry, strlen(session));
     if (IS_ERR(dentry)) {
         err = PTR_ERR(dentry);
-        pr_debug(pr_format("lookup_one_len failed on '%s', got error %d (%s)"), session, err, errtoa(err));
-        goto snapshots_path_put;
+        pr_debug(pr_format("lookup_one_len failed on '%s', got error %d (%s)"),
+                 session, err, errtoa(err));
+        goto out_unlock_put;
     }
     struct dentry *res = vfs_mkdir(mnt_idmap(parent.mnt), d_inode(parent.dentry), dentry, 0664);
     if (IS_ERR(res)) {
         err = PTR_ERR(res);
-        pr_debug(pr_format("vfs_mkdir failed on '%s/%s', got error %d (%s)"), ROOT_DIR, session, err, errtoa(err));
+        pr_debug(pr_format("vfs_mkdir failed on '%s/%s', got error %d (%s)"),
+                 ROOT_DIR, session, err, errtoa(err));
     }
     dput(dentry);
-snapshots_path_put:
+out_unlock_put:
     inode_unlock(parent_ino);
     path_put(&parent);
     return err;
 }
 
-static inline char *ltoa(sector_t sector, char *buffer) {
-    sprintf(buffer, "%lld", sector);
-    return buffer;
+static char *create_path(const char *session, sector_t sector) {
+    size_t n = strlen("/snapshots/") + strlen(session) + OCTET_SZ + 2;
+    char *path = kzalloc(n, GFP_KERNEL);
+    if (!path) {
+        pr_debug(pr_format("out of memory"));
+        return NULL;
+    }
+    sprintf(path, "/snapshots/%s/%lld", session, sector);
+    return path;
 }
 
 static void save_page(struct work_struct *work) {
@@ -126,21 +137,16 @@ static void save_page(struct work_struct *work) {
     if (!registry_get_session_id(w->devno, session, &has_dir)) {
         goto no_session;
     }
-    char *parent = path_join_alloc("/snapshots", session);
-    if (!parent) {
-        goto no_parent;
-    }
     if (!has_dir) {
         if (mkdir_session(session)) {
-            goto no_parent;
+            goto free_session;
         } else {
             registry_update_dir(w->devno, session);
         }
     }
-    char name[OCTET_SZ + 1] = {};
-    char *path = path_join_alloc(parent, ltoa(w->sector, name));
+    char *path = create_path(session, w->sector);
     if (!path) {
-        goto no_path;
+        goto free_session;
     }
     struct page_iter *it = &w->iter;
     struct file *fp = filp_open(path, O_CREAT | O_WRONLY, 0664);
@@ -148,31 +154,28 @@ static void save_page(struct work_struct *work) {
         pr_debug(pr_format("cannot open file: '%s', got error %ld"), path, PTR_ERR(fp));
         goto no_file;
     }
-    loff_t off;
-    void *va = kmap_local_page(it->page);
-    pr_debug(pr_format("save page=%p,(%p),%d,%d"), va, it, it->offset, it->len);
     if (it->offset + it->len > PAGE_SIZE) {
         pr_debug(pr_format("out of page bound: [%d, %d)"), it->offset, it->len);
         goto no_file;
     }
+    void *va = kmap_local_page(it->page);
+    loff_t off = 0;
     ssize_t n = kernel_write(fp, va + it->offset, it->len, &off);
+    kunmap_local(va);
     if (n != it->len) {
         pr_debug(pr_format("kernel_write failed to write whole page at '%s'"), path);
     }
-    kunmap_local(va);
     int err = filp_close(fp, NULL);
     if (err) {
         pr_debug(pr_format("filp_close failed to close file at '%s', got error %d"), path, err);
     }
 no_file:
     kfree(path);
-no_path:
-    kfree(parent);
-no_parent:
+free_session:
     kfree(session);
 no_session:
-    kfree(work);
     __free_page(it->page);
+    kfree(work);
 }
 
 static int add_work(dev_t devno, sector_t sector, struct page_iter *it) {
