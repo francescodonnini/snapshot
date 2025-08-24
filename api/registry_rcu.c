@@ -444,10 +444,12 @@ no_session:
 }
 
 static inline ssize_t length(struct snapshot_metadata *it) {
-    size_t n = strlen(it->dev_name);
+    size_t n = strlen(it->dev_name) + 2; // + length of ": "
     struct session *s = it->session.ptr;
     if (s) {
-        n += strlen(s->id);
+        n += strlen(s->id) + 1; // + length of "\n"
+    } else {
+        n += 2; // length of "-\n"
     }
     return n;
 }
