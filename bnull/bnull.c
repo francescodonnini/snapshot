@@ -132,9 +132,6 @@ int bnull_init(void) {
         goto delete_disk;
     }
     dev.bdev = bdev;
-    pr_debug(
-        pr_format("instance of '%s' created successfully: maj,min=%d,%d"),
-        DEV_NAME, MAJOR(dev.bdev->bd_dev), MINOR(dev.bdev->bd_dev));
     return 0;
 
 delete_disk:
