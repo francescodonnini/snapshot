@@ -461,7 +461,7 @@ no_session:
 }
 
 static inline ssize_t length(struct snapshot_metadata *it) {
-    size_t n = strlen(it->dev_name) + 2; // + length of ": "
+    size_t n = strlen(it->dev_name) + 1; // + length of " "
     struct session *s = it->session;
     if (s) {
         n += strlen(s->id) + 1; // + length of "\n"
@@ -490,10 +490,10 @@ ssize_t registry_show_session(char *buf, size_t size) {
             err = -1;
             break;
         }
-        br += sprintf(&buf[br], "%s: ", it->dev_name);
+        br += sprintf(&buf[br], "%s ", it->dev_name);
         struct session *s = it->session;
         if (s) {
-            br += sprintf(&buf[br], "/snapshots/%s\n", s->id);
+            br += sprintf(&buf[br], "%s\n", s->id);
         } else {
             br += sprintf(&buf[br], "-\n");
         }
