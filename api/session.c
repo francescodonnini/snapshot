@@ -31,6 +31,7 @@ struct session *session_create(dev_t dev) {
     }
     s->dev = dev;
     s->has_dir = false;
+    s->mntpoints = 1;
     return s;
 
 session_create_out:

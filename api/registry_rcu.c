@@ -16,19 +16,15 @@
 
 #define SHA1_HASH_LEN (20)
 
-struct session_current {
-    struct session *ptr;
-};
-
 // All snapshot metadata are stored in a doubly-linked list
 struct snapshot_metadata {
     struct list_head  list;
     // speed up searches by making string comparisons only on collisions or matches
-    unsigned long           dev_name_hash; 
-    char                   *dev_name;
-    char                   *password;
-    struct session_current  session;
-    struct rcu_head         rcu;
+    unsigned long     dev_name_hash; 
+    char             *dev_name;
+    char             *password;
+    struct session   *session;
+    struct rcu_head   rcu;
 };
 
 DEFINE_SPINLOCK(write_lock);
@@ -54,7 +50,7 @@ void registry_cleanup(void) {
     synchronize_rcu();
     struct snapshot_metadata *it, *tmp;
     list_for_each_entry_safe(it, tmp, &old_head, list) {
-        struct session *s = it->session.ptr;
+        struct session *s = it->session;
         if (s) {
             session_destroy(s);
         }
@@ -109,6 +105,7 @@ static inline struct snapshot_metadata *node_alloc_noname(gfp_t gfp) {
         return NULL;
     }
     node->password = (char*)node + sizeof(*node);
+    INIT_LIST_HEAD(&node->list);
     return node;
 }
 
@@ -186,7 +183,7 @@ int registry_insert(const char *dev_name, const char *password) {
  */
 static void node_free_rcu(struct rcu_head *head) {
     struct snapshot_metadata *node = container_of(head, struct snapshot_metadata, rcu);
-    struct session *s = node->session.ptr;
+    struct session *s = node->session;
     if (s) {
         session_destroy(s);
     }
@@ -216,7 +213,7 @@ static inline struct snapshot_metadata *get_by_name(const char *name) {
 static inline struct snapshot_metadata *get_by_dev(dev_t dev) {
     struct snapshot_metadata *it;
     list_for_each_entry_rcu(it, &registry_db, list) {
-        struct session *s = it->session.ptr;
+        struct session *s = it->session;
         if (s && s->dev == dev) {
             return it;
         }
@@ -256,7 +253,7 @@ int registry_delete(const char *dev_name, const char *password) {
 
 static inline bool is_active(struct snapshot_metadata *it, const void *args) {
     dev_t *dev = (dev_t*)args;
-    struct session *s = it->session.ptr;
+    struct session *s = it->session;
     return s && s->dev == *dev;
 }
 
@@ -274,50 +271,60 @@ static void create_session_rcu(struct rcu_head *head) {
  * @param dev_name - the path of the image associated with the device
  * @param dev      - the device number associated to the device
  * @returns 0 on success, <0 otherwise.
+ * 
+ * It's called in kretprobe context.
  */
 int registry_create_session(const char *dev_name, dev_t dev) {
-    struct snapshot_metadata *new_node = node_alloc_noname(GFP_KERNEL);
-    if (!new_node) {
+    struct snapshot_metadata *node = node_alloc_noname(GFP_KERNEL);
+    if (!node) {
         return -ENOMEM;
     }
-    int err;
     struct session *session = session_create(dev);
     if (!session) {
-        err = -ENOMEM;
-        goto no_session;
+        kfree(node);
+        return -ENOMEM;
     }
-    new_node->session.ptr = session;
     
+    bool session_present;
+    int err = 0;
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
-    struct snapshot_metadata *old_node = get_by_name(dev_name);
-    if (!old_node) {
-        pr_debug(pr_format("cannot find device='%s'"), dev_name);
+    struct snapshot_metadata *old = get_by_name(dev_name);
+    if (!old) {
+        pr_debug(pr_format("no session associated to device=%s,%d,%d"), dev_name, MAJOR(dev), MINOR(dev));
         err = -EWRONGCRED;
         goto release_lock;
-    } else if (old_node->session.ptr) {
-        pr_debug(pr_format("a session associated to device '%s' is currently active"), dev_name);
-        err = 0;
-        goto release_lock;
+    }
+    struct session *s = old->session;
+    session_present = s != NULL;
+    if (session_present) {
+        s->mntpoints++;
+        node->session = s;
+        pr_debug(pr_format("session ref counter updated: device=%s,%d,%d;uuid=%s;mntpoints=%d"),
+                 dev_name, MAJOR(dev), MINOR(dev), s->id, s->mntpoints);
+    } else {
+        node->session = session;
+        pr_debug(pr_format("session created successfully: device=%s,%d,%d;uuid=%s;mntpoints=%d"),
+                 dev_name, MAJOR(dev), MINOR(dev), session->id, session->mntpoints);
     }
 
-    new_node->dev_name = old_node->dev_name;
-    new_node->dev_name_hash = old_node->dev_name_hash;
-    memcpy(new_node->password, old_node->password, SHA1_HASH_LEN);
-
-    pr_debug(pr_format("device=%s;dev=%d,%d;uuid=%s"), dev_name, MAJOR(session->dev), MINOR(session->dev), session->id);
+    node->dev_name = old->dev_name;
+    node->dev_name_hash = old->dev_name_hash;
+    memcpy(node->password, old->password, SHA1_HASH_LEN);
     
-    list_replace_rcu(&old_node->list, &new_node->list);
+    list_replace_rcu(&old->list, &node->list);
     spin_unlock_irqrestore(&write_lock, flags);
     
-    call_rcu(&old_node->rcu, create_session_rcu);
+    if (session_present) {
+        session_destroy(session);
+    }
+    call_rcu(&old->rcu, create_session_rcu);
     return err;
 
 release_lock:
     spin_unlock_irqrestore(&write_lock, flags);
-no_session:
-    kfree(new_node->dev_name);
-    kfree(new_node);
+    kfree(node);
+    session_destroy(session);
     return err;
 }
 
@@ -332,7 +339,7 @@ int registry_add_sector(dev_t dev, sector_t sector, bool *added) {
     struct snapshot_metadata *it;
     struct session *s = NULL;
     list_for_each_entry_rcu(it, &registry_db, list) {
-        s = it->session.ptr;
+        s = it->session;
         registered = s && s->dev == dev;
         if (registered) {
             break;
@@ -358,7 +365,7 @@ int registry_lookup_sector(dev_t dev, sector_t sector, bool *present) {
     struct snapshot_metadata *it;
     struct session *s = NULL;
     list_for_each_entry_rcu(it, &registry_db, list) {
-        s = it->session.ptr;
+        s = it->session;
         registered = s && s->dev == dev;
         if (registered) {
             break;
@@ -381,7 +388,7 @@ bool registry_get_session_id(dev_t dev, char *id, bool *has_dir) {
     bool found = false;
     struct snapshot_metadata *it;
     list_for_each_entry_rcu(it, &registry_db, list) {
-        struct session *s = it->session.ptr;
+        struct session *s = it->session;
         found = s && s->dev == dev;
         if (found) {
             strncpy(id, s->id, UUID_STRING_LEN + 1);
@@ -395,8 +402,8 @@ bool registry_get_session_id(dev_t dev, char *id, bool *has_dir) {
 
 static void end_session_rcu(struct rcu_head *head) {
     struct snapshot_metadata *node = container_of(head, struct snapshot_metadata, rcu);
-    struct session *s = node->session.ptr;
-    if (s) {
+    struct session *s = node->session;
+    if (!s->mntpoints) {
         session_destroy(s);
     }
     kfree(node);
@@ -418,7 +425,7 @@ void registry_end_session(dev_t dev) {
     bool found = false;
     struct snapshot_metadata *it;
     list_for_each_entry_rcu(it, &registry_db, list) {
-        struct session *s = it->session.ptr;
+        struct session *s = it->session;
         found = s && s->dev == dev;
         if (found) {
             break;
@@ -434,7 +441,13 @@ void registry_end_session(dev_t dev) {
     new_node->dev_name = it->dev_name;
     new_node->dev_name_hash = it->dev_name_hash;
     memcpy(new_node->password, it->password, SHA1_HASH_LEN);
-    new_node->session.ptr = NULL;
+    struct session *s = it->session;
+    s->mntpoints--;
+    if (s->mntpoints) {
+        new_node->session = s;
+    } else {
+        new_node->session = NULL;
+    }
 
     list_replace_rcu(&it->list, &new_node->list);
 
@@ -449,7 +462,7 @@ no_session:
 
 static inline ssize_t length(struct snapshot_metadata *it) {
     size_t n = strlen(it->dev_name) + 2; // + length of ": "
-    struct session *s = it->session.ptr;
+    struct session *s = it->session;
     if (s) {
         n += strlen(s->id) + 1; // + length of "\n"
     } else {
@@ -478,7 +491,7 @@ ssize_t registry_show_session(char *buf, size_t size) {
             break;
         }
         br += sprintf(&buf[br], "%s: ", it->dev_name);
-        struct session *s = it->session.ptr;
+        struct session *s = it->session;
         if (s) {
             br += sprintf(&buf[br], "/snapshots/%s\n", s->id);
         } else {
@@ -523,13 +536,13 @@ void registry_update_dir(dev_t dev, const char *session) {
     new_node->dev_name = old_node->dev_name;
     new_node->dev_name_hash = old_node->dev_name_hash;
     memcpy(new_node->password, old_node->password, SHA1_HASH_LEN);
-    struct session *s = old_node->session.ptr;
+    struct session *s = old_node->session;
     if (!s) {
         pr_debug(pr_format("no session associated with device %s"), old_node->dev_name);
         goto release_lock;
     }
     s->has_dir = true;
-    new_node->session.ptr = s;
+    new_node->session = s;
 
     list_replace_rcu(&old_node->list, &new_node->list);
 
