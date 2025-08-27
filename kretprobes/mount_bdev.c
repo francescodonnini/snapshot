@@ -11,33 +11,21 @@
 #include <linux/major.h>
 #include <linux/printk.h>
 
-static inline char* get_dev_name(struct pt_regs *regs) {
-    return get_arg3(char*, regs);
-}
-
 int mount_bdev_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     // store the device name in the kretprobe instance data
     // so that it can be used in the return handler to check if the device has been successfully mounted
-    struct mount_bdev_data *data = (struct mount_bdev_data*)kp->data;
-    data->dev_name = get_dev_name(regs);
+    char **data = (char**)kp->data;
+    *data = get_arg3(char*, regs);
     return 0;
 }
 
-static inline int get_bdev_safe(struct dentry *dentry, struct block_device **bdev) {
-    if (!dentry) {
-        pr_debug(pr_format("fs_context is NULL"));
-        return -1;
-    }
-    if (!dentry->d_sb) {
-        pr_debug(pr_format("root is NULL"));
-        return -1;
-    }
-    if (!dentry->d_sb->s_bdev) {
-        pr_debug(pr_format("block device is NULL"));
-        return -1;
+static inline bool d_bdev_safe(struct dentry *dentry, struct block_device **bdev) {
+    if (!dentry || !dentry->d_sb || !dentry->d_sb->s_bdev) {
+        pr_debug(pr_format("cannot read struct block device*"));
+        return false;
     }
     *bdev = dentry->d_sb->s_bdev;
-    return 0;
+    return true;
 }
 
 /**
@@ -52,10 +40,10 @@ int mount_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
         pr_debug(pr_format("failed with error: %ld"), PTR_ERR(dentry));
         return 0;
     }
-    struct mount_bdev_data *data = (struct mount_bdev_data*)kp->data;
+    char **data = (char**)kp->data;
     struct block_device *bdev;
-    if (!get_bdev_safe(dentry, &bdev)) {
-        update_session(data->dev_name, bdev);
+    if (!d_bdev_safe(dentry, &bdev)) {
+        update_session(*data, bdev);
     }
     return 0;
 }

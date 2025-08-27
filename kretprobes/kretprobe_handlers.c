@@ -13,23 +13,30 @@ static struct kretprobe submit_bio_kretprobe = {
 
 static struct kretprobe mount_bdev_kretprobe = {
     .kp.symbol_name = "mount_bdev",
-    .handler = mount_bdev_handler,
     .entry_handler = mount_bdev_entry_handler,
-    .data_size = sizeof(struct mount_bdev_data)
+    .handler = mount_bdev_handler,
+    .data_size = sizeof(char**)
 };
 
 static struct kretprobe umount_kretprobe = {
     .kp.symbol_name = "path_umount",
     .entry_handler = path_umount_entry_handler,
     .handler = path_umount_handler,
-    .data_size = sizeof(struct umount_data)
+    .data_size = sizeof(dev_t)
 };
 
 static struct kretprobe get_tree_bdev_kretprobe = {
     .kp.symbol_name = "get_tree_bdev",
     .entry_handler = get_tree_entry_handler,
     .handler = get_tree_handler,
-    .data_size = sizeof(struct get_tree_data),
+    .data_size = sizeof(struct fs_context*),
+};
+
+static struct kretprobe ext4_fill_super_kretprobe = {
+    .kp.symbol_name = "ext4_fill_super",
+    .entry_handler = ext4_fill_super_entry_handler,
+    .handler = ext4_fill_super_handler,
+    .data_size = sizeof(dev_t),
 };
 
 static struct kretprobe *kretprobe_table[] = {

@@ -5,20 +5,21 @@
 #include <linux/path.h>
 #include <linux/printk.h>
 
-static inline int p_dev_safe(struct path *path, dev_t *dev) {
+static inline bool p_dev_safe(struct path *path, dev_t *dev) {
     if (!path || !path->mnt || !path->mnt->mnt_sb || !path->mnt->mnt_sb->s_bdev) {
-        return -1;
+        return false;
     }
     *dev = path->mnt->mnt_sb->s_bdev->bd_dev;
-    return 0;
+    return true;
 }
 
 int path_umount_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
-    struct path *path = get_arg1(struct path*, regs);
     dev_t dev;
-    int err = p_dev_safe(path, &dev);
-    struct umount_data *data = (struct umount_data*)kp->data;
-    data->dev = dev;
+    if (!p_dev_safe(get_arg1(struct path*, regs), &dev)) {
+        return -1;
+    }
+    dev_t *data = (dev_t*)kp->data;
+    *data = dev;
     return 0;
 }
 
@@ -26,7 +27,7 @@ int path_umount_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     if (get_rval(int, regs)) {
         return 0;
     }
-    struct umount_data *data = (struct umount_data*)kp->data;
-    pr_debug(pr_format("device %d,%d has been unmounted successfully"), MAJOR(data->dev), MINOR(data->dev));
+    dev_t *dev = (dev_t*)kp->data;
+    pr_debug(pr_format("device %d,%d has been unmounted successfully"), MAJOR(*dev), MINOR(*dev));
     return 0;
 }

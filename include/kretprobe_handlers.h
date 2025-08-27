@@ -83,10 +83,6 @@ struct umount_data {
     dev_t dev;
 };
 
-struct get_tree_data {
-    struct fs_context *fc;
-};
-
 int mount_bdev_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 
 int mount_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
@@ -100,5 +96,9 @@ int path_umount_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 int get_tree_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 
 int get_tree_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
+
+int ext4_fill_super_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
+
+int ext4_fill_super_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 
 #endif
