@@ -44,6 +44,7 @@ static struct kretprobe *kretprobe_table[] = {
     &mount_bdev_kretprobe,
     &umount_kretprobe,
     &get_tree_bdev_kretprobe,
+    &ext4_fill_super_kretprobe,
 };
 static size_t KRETPROBES_NUM = sizeof(kretprobe_table) / sizeof(struct kretprobe *);
 
@@ -67,6 +68,9 @@ int probes_init(void) {
 }
 
 void probes_cleanup(void) {
-    pr_debug(pr_format("submit_bio: #missed=%d"), submit_bio_kretprobe.nmissed);
+    for (int i = 0; i < KRETPROBES_NUM; ++i) {
+        struct kretprobe *kp = kretprobe_table[i];
+        pr_debug(pr_format("%s: #missed=%d"), kp->kp.symbol_name, kp->nmissed);
+    }
     unregister_kretprobes(kretprobe_table, KRETPROBES_NUM);
 }
