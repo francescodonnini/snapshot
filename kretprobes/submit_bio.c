@@ -39,6 +39,12 @@ static struct bio *create_dummy_bio(struct bio *orig_bio) {
     return dummy;
 }
 
+static bool empty_write(struct bio *bio) {
+    return op_is_write(bio->bi_opf)
+           && (bio->bi_iter.bi_size == 0
+               || bio->bi_vcnt == 0);
+}
+
 /**
  * skip_handler returns true if the submit_bio entry handler shouldn't execute, that is a bio:
  * 1. is null or is not a write bio;
@@ -49,7 +55,9 @@ static struct bio *create_dummy_bio(struct bio *orig_bio) {
  *    results.
  */
 static bool skip_handler(struct bio *bio) {
-    if (!bio || !op_is_write(bio->bi_opf)) {
+if (!bio
+    || !op_is_write(bio->bi_opf)
+    || empty_write(bio)) {
         return true;
     }
     bool present;
@@ -91,7 +99,7 @@ int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
     // * the request is not for writing;
     // * the request was sent to a device not registered;
     if (skip_handler(bio)) {
-        return 1;
+        return 0;
     }
     struct bio *dummy_bio = create_dummy_bio(bio);
     if (dummy_bio) {
