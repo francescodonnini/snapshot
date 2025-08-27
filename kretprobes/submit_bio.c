@@ -55,7 +55,7 @@ static bool empty_write(struct bio *bio) {
  *    results.
  */
 static bool skip_handler(struct bio *bio) {
-if (!bio
+    if (!bio
     || !op_is_write(bio->bi_opf)
     || empty_write(bio)) {
         return true;
@@ -94,6 +94,10 @@ if (!bio
  */
 int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     struct bio *bio = get_arg1(struct bio*, regs);
+    dev_t dev = MKDEV(7,0);
+    if (bio->bi_bdev->bd_dev == dev && op_is_write(bio->bi_opf)) {
+        pr_debug(pr_format("intercepted bio #sector=%llu"), bio->bi_iter.bi_sector);
+    }
     // skip the return handler if at least one of the following conditions apply:
     // * the request is NULL
     // * the request is not for writing;

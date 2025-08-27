@@ -27,6 +27,7 @@ ccflags-y += -I$(src)/include
 
 CFLAGS_api/snapshot.o += -DDEBUG
 CFLAGS_bio/dbg_dump_bio.o += -DDEBUG
+CFLAGS_kretprobes/get_tree.o += -DDEBUG
 CFLAGS_kretprobes/kretprobe_handlers.o += -DDEBUG
 CFLAGS_kretprobes/submit_bio.o += -DDEBUG
 
