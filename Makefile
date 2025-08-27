@@ -25,19 +25,10 @@ PWD := $(CURDIR)
 
 ccflags-y += -I$(src)/include
 
-CFLAGS_api/hashset_rcu.o += -DDEBUG
-CFLAGS_api/registry_rcu.o += -DDEBUG
-CFLAGS_api/session.o += -DDEBUG
 CFLAGS_api/snapshot.o += -DDEBUG
-CFLAGS_bio/bio_enqueue.o += -DDEBUG
-CFLAGS_kretprobes/submit_bio.o += -DDEBUG
 CFLAGS_bio/dbg_dump_bio.o += -DDEBUG
 CFLAGS_kretprobes/kretprobe_handlers.o += -DDEBUG
-CFLAGS_kretprobes/mount_bdev.o += -DDEBUG
-CFLAGS_kretprobes/get_tree.o += -DDEBUG
-CFLAGS_kretprobes/path_umount.o += -DDEBUG
-CFLAGS_kretprobes/update_session.o += -DDEBUG
-CFLAGS_bnull/bnull.o += -DDEBUG
+CFLAGS_kretprobes/submit_bio.o += -DDEBUG
 
 all: 
 		make -C /lib/modules/$(shell uname -r)/build M=$(PWD)  modules 

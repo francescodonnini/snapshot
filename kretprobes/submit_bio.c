@@ -62,7 +62,7 @@ static bool skip_handler(struct bio *bio) {
     int err = registry_lookup_sector(devno, sector, &present);
     if (err) {
         if (err != -ENOSSN) {
-            pr_debug(pr_format("hashset_add completed with error %d"), err);
+            pr_debug(pr_format("registry_lookup_sector completed with error %d"), err);
         }
         return true;
     }

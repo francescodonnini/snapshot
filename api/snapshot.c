@@ -15,8 +15,8 @@
 #include <linux/sprintf.h>
 #include <linux/workqueue.h>
 
-#define OCTET_SZ (16)
-#define ROOT_DIR "/snapshots"
+#define MAX_NAME_LEN (20)
+#define ROOT_DIR     "/snapshots"
 
 struct save_work {
     struct work_struct  work;
@@ -117,7 +117,7 @@ out_unlock_put:
 }
 
 static char *create_path(const char *session, sector_t sector) {
-    size_t n = strlen("/snapshots/") + strlen(session) + OCTET_SZ + 2;
+    size_t n = strlen("/snapshots/") + strlen(session) + MAX_NAME_LEN + 2;
     char *path = kzalloc(n, GFP_KERNEL);
     if (!path) {
         pr_debug(pr_format("out of memory"));
@@ -128,12 +128,22 @@ static char *create_path(const char *session, sector_t sector) {
 }
 
 static void save_page(struct work_struct *work) {
+    struct save_work *w = container_of(work, struct save_work, work);
+    bool added;
+    int err = registry_add_sector(w->devno, w->sector, &added);
+    if (err) {
+        pr_debug(pr_format("registry_lookup_sector completed with error %d"), err);
+        goto no_session;
+    }
+    if (!added) {
+        pr_debug(pr_format("a snapshot of this region (#%lld) has already been made"), w->sector);
+        goto no_session;
+    }
     char *session = kzalloc(UUID_STRING_LEN + 1, GFP_KERNEL);
     if (!session) {
         goto no_session;
     }
     bool has_dir;
-    struct save_work *w = container_of(work, struct save_work, work);
     if (!registry_get_session_id(w->devno, session, &has_dir)) {
         goto no_session;
     }
@@ -165,7 +175,7 @@ static void save_page(struct work_struct *work) {
     if (n != it->len) {
         pr_debug(pr_format("kernel_write failed to write whole page at '%s'"), path);
     }
-    int err = filp_close(fp, NULL);
+    err = filp_close(fp, NULL);
     if (err) {
         pr_debug(pr_format("filp_close failed to close file at '%s', got error %d"), path, err);
     }
@@ -174,7 +184,7 @@ no_file:
 free_session:
     kfree(session);
 no_session:
-    __free_page(it->page);
+    __free_page(w->iter.page);
     kfree(work);
 }
 
@@ -193,6 +203,7 @@ static int add_work(dev_t devno, sector_t sector, struct page_iter *it) {
 }
 
 void snapshot_save(struct bio *bio) {
+    dbg_dump_bio("saving bio:\n", bio);
     dev_t dev = bio_devno(bio);
     sector_t sector = bio_sector(bio);
     struct bio_private_data *p = bio->bi_private;

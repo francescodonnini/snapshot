@@ -60,5 +60,6 @@ int probes_init(void) {
 }
 
 void probes_cleanup(void) {
+    pr_debug(pr_format("submit_bio: #missed=%d"), submit_bio_kretprobe.nmissed);
     unregister_kretprobes(kretprobe_table, KRETPROBES_NUM);
 }

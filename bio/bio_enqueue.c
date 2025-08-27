@@ -56,13 +56,6 @@ static void dbg_dump_read_bio(const char *prefix, struct bio *bio) {
 static void read_original_block_end_io(struct bio *bio) {
     if (bio->bi_status == BLK_STS_OK) {
         snapshot_save(bio);
-        dev_t devno = bio_devno(bio);
-        sector_t sector = bio_sector(bio);
-        // only at this point a write bio request can avoid the slow path
-        int err = registry_add_sector(devno, sector, NULL);
-        if (err) {
-            pr_debug(pr_format("registry_add_sector failed to add pair (%d, %llu), got error %d"), devno, sector, err);
-        }
     } else {
         pr_debug(pr_format("bio completed with error %d"), bio->bi_status);
     }
@@ -90,7 +83,6 @@ static inline int __add_page(struct bio *bio, int i, struct page *page, unsigned
  * latter save the page content in the /snapshots directory.
  */
 static inline int add_page(struct bio_vec *bvec, struct bio *bio, int i) {
-    pr_debug(pr_format("bvec=(len=%d,off=%d,page=%p)"), bvec->bv_len, bvec->bv_offset, bvec->bv_page);
     struct page *page = alloc_page(GFP_KERNEL);
     if (!page) {
         return -ENOMEM;
@@ -160,7 +152,6 @@ static struct bio* create_read_bio(struct bio *orig_bio) {
         pr_debug(pr_format("allocate_pages failed"));
         goto no_pages;
     }
-    dbg_dump_bio("read bio created successfully:\n", read_bio);
     return read_bio;
 no_pages:
     bio_put(read_bio);
