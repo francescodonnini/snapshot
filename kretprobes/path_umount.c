@@ -30,6 +30,6 @@ int path_umount_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
         return 0;
     }
     struct umount_data *data = (struct umount_data*)kp->data;
-    registry_end_session(data->dev);
+    pr_debug(pr_format("device %d,%d has been unmounted successfully"), MAJOR(data->dev), MINOR(data->dev));
     return 0;
 }
