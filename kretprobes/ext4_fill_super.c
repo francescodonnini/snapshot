@@ -1,8 +1,10 @@
 #include "kretprobe_handlers.h"
+#include "pr_format.h"
 #include "registry.h"
 #include "update_session.h"
 #include <linux/blk_types.h>
 #include <linux/fs_context.h>
+#include <linux/printk.h>
 
 static inline bool s_get_bdev_safe(struct super_block *sb, struct block_device **bdev) {
     if (!sb || !sb->s_bdev) {
