@@ -68,7 +68,7 @@ parent_put:
  * @returns 0 on success, <0 otherwise
  */
 int snapshot_init(void) {
-    queue = create_workqueue("save_files_wq");
+    queue = alloc_workqueue("save_files_wq", WQ_UNBOUND | WQ_MEM_RECLAIM, 0);
     if (!queue) {
         pr_debug(pr_format("cannot create workqueue to save file(s)"));
         return -ENOMEM;
@@ -123,7 +123,7 @@ static char *create_path(const char *session, sector_t sector) {
         pr_debug(pr_format("out of memory"));
         return NULL;
     }
-    sprintf(path, "/snapshots/%s/%lld", session, sector);
+    sprintf(path, "/snapshots/%s/%llu", session, sector);
     return path;
 }
 
@@ -136,7 +136,7 @@ static void save_page(struct work_struct *work) {
         goto no_session;
     }
     if (!added) {
-        pr_debug(pr_format("a snapshot of this region (#%lld) has already been made"), w->sector);
+        pr_debug(pr_format("a snapshot of this region (#%llu) has already been made"), w->sector);
         goto no_session;
     }
     char *session = kzalloc(UUID_STRING_LEN + 1, GFP_KERNEL);
@@ -213,6 +213,6 @@ void snapshot_save(struct bio *bio) {
         if (err == -ENOMEM) {
             __free_page(it->page);
         }
-        sector += it->len;
+        sector += it->len >> 9;
     }
 }
