@@ -18,7 +18,7 @@ struct bio_work {
 static struct workqueue_struct *wq;
 
 int bio_deferred_work_init(void) {
-    wq = create_workqueue("bio_wq");
+    wq = alloc_ordered_workqueue("bio_wq", 0);
     if (!wq) {
         pr_debug(pr_format("cannot create wq for bio(s)"));
         return -ENOMEM;
@@ -29,24 +29,6 @@ int bio_deferred_work_init(void) {
 void bio_deferred_work_cleanup(void) {
     flush_workqueue(wq);
     destroy_workqueue(wq);
-}
-
-static void dbg_dump_bio_content(struct bio *bio) {
-    struct bio_private_data *p = bio->bi_private;
-    for (int i = 0; i < p->nr_pages; ++i) {
-        struct page_iter *it = &p->iter[i];
-        char *va = kmap_local_page(it->page);
-        pr_debug(pr_format("processing data at address %p of size %lu\n"), va, PAGE_SIZE);
-        print_hex_dump_bytes("data: ", DUMP_PREFIX_OFFSET, va + it->offset, it->len);
-        kunmap_local(va);
-    }
-}
-
-static void dbg_dump_read_bio(const char *prefix, struct bio *bio) {
-    dbg_dump_bio(prefix, bio);
-    if (bio->bi_status == BLK_STS_OK) {
-        dbg_dump_bio_content(bio);
-    }
 }
 
 /**
@@ -130,16 +112,13 @@ static struct bio* create_read_bio(struct bio *orig_bio) {
     size_t size = sizeof(*data) + sizeof(struct page_iter) * orig_bio->bi_vcnt;
     data = kzalloc(size, GFP_KERNEL);
     if (!data) {
-        pr_debug(pr_format("cannot allocate enough memory for struct bio_private_data(%d)"), orig_bio->bi_vcnt);
+        pr_debug(pr_format("out of memory"));
         return NULL;
     }
     data->orig_bio = orig_bio;
     data->nr_pages = orig_bio->bi_vcnt;
     sector_t sector = bio_sector(orig_bio);
     data->sector = sector;
-    if (!data) {
-        return NULL;
-    }
     struct bio *read_bio = bio_alloc(orig_bio->bi_bdev, orig_bio->bi_vcnt, REQ_OP_READ, GFP_KERNEL);
     if (!read_bio) {
         pr_debug(pr_format("bio_alloc failed"));
