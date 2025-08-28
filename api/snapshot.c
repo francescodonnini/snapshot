@@ -49,15 +49,14 @@ static int mkdir_snapshots(void) {
         pr_debug(pr_format("lookup_one_len failed on 'snapshots', got error %d (%s)"), err, errtoa(err));
         goto parent_put;
     }
-    struct dentry *res = vfs_mkdir(mnt_idmap(parent.mnt), d_inode(d_parent), dentry, 0755);
-    if (IS_ERR(res)) {
-        err = PTR_ERR(res);
+    dentry = vfs_mkdir(mnt_idmap(parent.mnt), d_inode(d_parent), dentry, 0755);
+    if (IS_ERR(dentry)) {
+        err = PTR_ERR(dentry);
         pr_debug(pr_format("vfs_mkdir failed on '%s', got error %d (%s)"), ROOT_DIR, err, errtoa(err));
     } else {
-        dput(res);
+        dput(dentry);
     }
 
-    dput(dentry);
 parent_put:
     inode_unlock(d_inode(d_parent));
     path_put(&parent);
@@ -104,15 +103,14 @@ static int mkdir_session(const char *session) {
                  session, err, errtoa(err));
         goto out_unlock_put;
     }
-    struct dentry *res = vfs_mkdir(mnt_idmap(parent.mnt), d_inode(d_parent), dentry, 0755);
-    if (IS_ERR(res)) {
-        err = PTR_ERR(res);
+    dentry = vfs_mkdir(mnt_idmap(parent.mnt), d_inode(d_parent), dentry, 0755);
+    if (IS_ERR(dentry)) {
+        err = PTR_ERR(dentry);
         pr_debug(pr_format("vfs_mkdir failed on '%s/%s', got error %d (%s)"),
                  ROOT_DIR, session, err, errtoa(err));
     } else {
-        dput(res);
+        dput(dentry);
     }
-    dput(dentry);
 out_unlock_put:
     inode_unlock(d_inode(d_parent));
     path_put(&parent);
