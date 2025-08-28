@@ -28,27 +28,28 @@ struct save_work {
 static struct workqueue_struct *queue;
 
 static int mkdir_snapshots(void) {
-    struct path path;
-    int err = kern_path(ROOT_DIR, LOOKUP_DIRECTORY, &path);
-    if (!err) {
-        pr_debug(pr_format("directory '%s' already exists"), ROOT_DIR);
-        path_put(&path);
-        return 0;
-    }
     struct path parent;
-    err = kern_path("/", LOOKUP_DIRECTORY, &parent);
+    int err = kern_path("/", LOOKUP_DIRECTORY, &parent);
     if (err) {
         pr_debug(pr_format("kern_path failed on '/', got error %d (%s)"), err, errtoa(err));
         return err;
     }
+
     struct dentry *d_parent = parent.dentry;
     inode_lock(d_inode(d_parent));
     struct dentry *dentry = lookup_one_len("snapshots", d_parent, strlen("snapshots"));
     if (IS_ERR(dentry)) {
         err = PTR_ERR(dentry);
         pr_debug(pr_format("lookup_one_len failed on 'snapshots', got error %d (%s)"), err, errtoa(err));
-        goto parent_put;
+        goto out_unlock_put;
     }
+
+    if (d_really_is_positive(dentry)) {
+        pr_debug(pr_format("directory /snapshots already exists"));
+        dput(dentry);
+        goto out_unlock_put;
+    }
+
     dentry = vfs_mkdir(mnt_idmap(parent.mnt), d_inode(d_parent), dentry, 0755);
     if (IS_ERR(dentry)) {
         err = PTR_ERR(dentry);
@@ -57,7 +58,7 @@ static int mkdir_snapshots(void) {
         dput(dentry);
     }
 
-parent_put:
+out_unlock_put:
     inode_unlock(d_inode(d_parent));
     path_put(&parent);
     return err;
@@ -90,19 +91,27 @@ static int mkdir_session(const char *session) {
     struct path parent;
     int err = kern_path(ROOT_DIR, LOOKUP_DIRECTORY, &parent);
     if (err) {
-        pr_debug(pr_format("'%s' does not exists, got error %d (%s)"),
-                 ROOT_DIR, err, errtoa(err));
+        pr_debug(pr_format("%s does not exist, got error %d (%s)"), ROOT_DIR, err, errtoa(err));
         return err;
     }
+
     struct dentry *d_parent = parent.dentry;
     inode_lock(d_inode(d_parent));
     struct dentry *dentry = lookup_one_len(session, d_parent, strlen(session));
     if (IS_ERR(dentry)) {
         err = PTR_ERR(dentry);
-        pr_debug(pr_format("lookup_one_len failed on '%s', got error %d (%s)"),
+        pr_debug(pr_format("lookup_one_len failed on %s, got error %d (%s)"),
                  session, err, errtoa(err));
         goto out_unlock_put;
     }
+    
+    if (d_really_is_positive(dentry)) {
+        // Already exists!
+        pr_debug(pr_format("%s/%s already exists"), ROOT_DIR, session);
+        dput(dentry);
+        goto out_unlock_put;
+    }
+
     dentry = vfs_mkdir(mnt_idmap(parent.mnt), d_inode(d_parent), dentry, 0755);
     if (IS_ERR(dentry)) {
         err = PTR_ERR(dentry);
@@ -143,10 +152,12 @@ static void save_page(struct work_struct *work) {
     }
     char *session = kzalloc(UUID_STRING_LEN + 1, GFP_KERNEL);
     if (!session) {
+        pr_debug(pr_format("out of memory"));
         goto no_session;
     }
     bool has_dir;
     if (!registry_has_directory(w->devno, session, &has_dir)) {
+        pr_debug(pr_format("no session associated to device %d:%d"), MAJOR(w->devno), MINOR(w->devno));
         goto no_session;
     }
     if (!has_dir) {
