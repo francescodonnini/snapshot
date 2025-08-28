@@ -16,6 +16,12 @@
 
 #define SHA1_HASH_LEN (20)
 
+// Little auxiliary struct used by "by_name" predicate
+struct node_name {
+    const char    *name;
+    unsigned long  hash;
+};
+
 // All snapshot metadata are stored in a doubly-linked list
 struct snapshot_metadata {
     struct list_head  list;
@@ -58,6 +64,10 @@ void registry_cleanup(void) {
     }
 }
 
+/**
+ * registry_lookup_rcu returns true if a node in the list satisfies a certain predicate, it runs inside an RCU
+ * critical section
+ */
 static inline bool registry_lookup_rcu(bool(*pred)(struct snapshot_metadata*, const void *args), const void *args) {
     struct snapshot_metadata *it;
     bool b = false;
@@ -72,24 +82,47 @@ static inline bool registry_lookup_rcu(bool(*pred)(struct snapshot_metadata*, co
     return b;
 }
 
-static inline bool by_dev_name(struct snapshot_metadata *it, const void *args) {
-    struct snapshot_metadata *node = (struct snapshot_metadata*)args;
-    return it->dev_name_hash == node->dev_name_hash
-           && !strcmp(it->dev_name, node->dev_name);
+/**
+ * registry_get_by looks up for a node that satisfies a certain predicate: pred. It assumes that the lock is held
+ * while calling this function!
+ */
+static inline struct snapshot_metadata *registry_get_by(bool (*pred)(struct snapshot_metadata*, const void*), const void *args) {
+    struct snapshot_metadata *it;
+    list_for_each_entry_rcu(it, &registry_db, list) {
+        if (pred(it, args)) {
+            return it;
+        }
+    }
+    return NULL;
+}
+
+static inline bool by_name(struct snapshot_metadata *node, const void *args) {
+    struct node_name *name = (struct node_name*)args;
+    return node->dev_name_hash == name->hash && !strcmp(node->dev_name, name->name);
+}
+
+static inline bool by_dev(struct snapshot_metadata *node, const void *args) {
+    dev_t *dev = (dev_t*)args;
+    struct session *s = node->session;
+    return s && s->dev == *dev;
+}
+
+static inline bool is_active(struct snapshot_metadata *it, const void *args) {
+    dev_t *dev = (dev_t*)args;
+    struct session *s = it->session;
+    return s && s->dev == *dev;
 }
 
 /**
- * try_add adds a snapshot_metadata inside the registry database if another entity
- * with the same name does not already exist. It assumes that the lock is held.
- * @param ep the entity to be added
- * @return 0 if the insertion was sucessfull, -EDUPNAME otherwise
+ * get_by_name search a node whose device name is equal to name. It assumes it's called inside
+ * a RCU critical section or a while a spinlock is held.
  */
-static int try_add(struct snapshot_metadata *ep) {
-    if (registry_lookup_rcu(by_dev_name, ep)) {
-        return -EDUPNAME;
-    }
-    list_add_rcu(&ep->list, &registry_db);
-    return 0;
+static inline struct snapshot_metadata *get_by_name(const char *name) {
+    struct node_name nn = {
+        .hash = fast_hash(name),
+        .name = name
+    };
+    return registry_get_by(by_name, &nn);
 }
 
 /**
@@ -169,7 +202,17 @@ int registry_insert(const char *dev_name, const char *password) {
     }
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
-    int err = try_add(node);
+    int err;
+    struct node_name name = { 
+        .hash = node->dev_name_hash,
+        .name = node->dev_name
+    };
+    if (registry_lookup_rcu(by_name, &name)) {
+        err = -EDUPNAME;
+    } else {
+        list_add_rcu(&node->list, &registry_db);
+        err = 0;
+    }
     spin_unlock_irqrestore(&write_lock, flags);
     if (err) {
         kfree(node);
@@ -178,10 +221,10 @@ int registry_insert(const char *dev_name, const char *password) {
 }
 
 /**
- * node_free_rcu release all the resources associated with a certain snapshot. It destroy a session and should be called only when a node
+ * registry_delete_rcu release all the resources associated with a certain snapshot. It destroy a session and should be called only when a node
  * is removed from the list (not updated).
  */
-static void node_free_rcu(struct rcu_head *head) {
+static void registry_delete_rcu(struct rcu_head *head) {
     struct snapshot_metadata *node = container_of(head, struct snapshot_metadata, rcu);
     struct session *s = node->session;
     if (s) {
@@ -190,37 +233,6 @@ static void node_free_rcu(struct rcu_head *head) {
     kfree(node->dev_name);
     kfree(node);
 }
-
-/**
- * get_by_name search a node whose device name is equal to name. It assumes it's called inside
- * a RCU critical section or a while a spinlock is held.
- */
-static inline struct snapshot_metadata *get_by_name(const char *name) {
-    unsigned long name_hash = fast_hash(name);
-    struct snapshot_metadata *it;
-    list_for_each_entry_rcu(it, &registry_db, list) {
-        if (name_hash == it->dev_name_hash && !strcmp(name, it->dev_name)) {
-            return it;
-        }
-    }
-    return NULL;
-}
-
-/**
- * get_by_dev search a node whose device number is equal to dev. It assumes it's called inside
- * a RCU critical section or a while a spinlock is held.
- */
-static inline struct snapshot_metadata *get_by_dev(dev_t dev) {
-    struct snapshot_metadata *it;
-    list_for_each_entry_rcu(it, &registry_db, list) {
-        struct session *s = it->session;
-        if (s && s->dev == dev) {
-            return it;
-        }
-    }
-    return NULL;
-}
-
 
 /**
  * registry_delete deletes the credentials associated with the block-device dev_name
@@ -246,39 +258,43 @@ int registry_delete(const char *dev_name, const char *password) {
     
     kfree(buffer);
     if (!err) {
-        call_rcu(&it->rcu, node_free_rcu);
+        call_rcu(&it->rcu, registry_delete_rcu);
     }
     return err;
 }
 
-static inline bool is_active(struct snapshot_metadata *it, const void *args) {
-    dev_t *dev = (dev_t*)args;
-    struct session *s = it->session;
-    return s && s->dev == *dev;
-}
-
 bool registry_lookup_active(dev_t dev) {
-    return registry_lookup_rcu(is_active, (void*)&dev);
+    return registry_lookup_rcu(is_active, &dev);
 }
 
-static void create_session_rcu(struct rcu_head *head) {
+static void free_node_only_rcu(struct rcu_head *head) {
     struct snapshot_metadata *node = container_of(head, struct snapshot_metadata, rcu);
     kfree(node);
 }
 
+static void free_session_rcu(struct rcu_head *head) {
+    struct snapshot_metadata *node = container_of(head, struct snapshot_metadata, rcu);
+    if (node->session) {
+        session_destroy(node->session);
+    }
+    kfree(node);
+}
+
 /**
- * registry_create_session updates a previously registered image/device with the associated device number
+ * registry_session_get updates a previously registered image/device with the associated device number, if a session has been already registered,
+ * then it increments it usage counter.
  * @param dev_name - the path of the image associated with the device
  * @param dev      - the device number associated to the device
  * @returns 0 on success, <0 otherwise.
  * 
  * It's called in kretprobe context.
  */
-int registry_create_session(const char *dev_name, dev_t dev) {
+int registry_session_get(const char *dev_name, dev_t dev) {
     struct snapshot_metadata *node = node_alloc_noname(GFP_KERNEL);
     if (!node) {
         return -ENOMEM;
     }
+    // WARNING: it is possibile that this function sleeps (it uses kmalloc(GFP_KERNEL))
     struct session *session = session_create(dev);
     if (!session) {
         kfree(node);
@@ -291,17 +307,31 @@ int registry_create_session(const char *dev_name, dev_t dev) {
     spin_lock_irqsave(&write_lock, flags);
     struct snapshot_metadata *old = get_by_name(dev_name);
     if (!old) {
-        pr_debug(pr_format("no session associated to device=%s,%d,%d"), dev_name, MAJOR(dev), MINOR(dev));
+        pr_debug(pr_format("no session associated to device=%s,%d:%d"), dev_name, MAJOR(dev), MINOR(dev));
         err = -EWRONGCRED;
         goto release_lock;
     }
+    bool free_session = false;
     struct session *s = old->session;
     session_present = s != NULL;
     if (session_present) {
-        s->mntpoints++;
-        node->session = s;
-        pr_debug(pr_format("session ref counter updated: device=%s,%d,%d;uuid=%s;mntpoints=%d"),
-                 dev_name, MAJOR(dev), MINOR(dev), s->id, s->mntpoints);
+        // There are two possible scenarios:
+        // 1. s->mntpoints > 0: the current session is still active.
+        // 2. s->mntpoints = 0: the associated block device has been unmounted but it is still possible for the
+        //    device to receive bio requests.
+        if (s->mntpoints > 0) {
+            s->mntpoints++;
+            // we can free the old node but not the session associated with it
+            node->session = s;
+            pr_debug(pr_format("session usage counter updated: device=%s,%d,%d;uuid=%s;mntpoints=%d"),
+                     dev_name, MAJOR(dev), MINOR(dev), s->id, s->mntpoints);
+        } else {
+            // the old session could be deallocated because a new device has been mounted
+            node->session = session;
+            free_session = true;
+            pr_debug(pr_format("session created successfully: device=%s,%d,%d;uuid=%s;mntpoints=%d"),
+                     dev_name, MAJOR(dev), MINOR(dev), session->id, session->mntpoints);
+        }
     } else {
         node->session = session;
         pr_debug(pr_format("session created successfully: device=%s,%d,%d;uuid=%s;mntpoints=%d"),
@@ -314,11 +344,12 @@ int registry_create_session(const char *dev_name, dev_t dev) {
     
     list_replace_rcu(&old->list, &node->list);
     spin_unlock_irqrestore(&write_lock, flags);
-    
-    if (session_present) {
-        session_destroy(session);
+
+    if (free_session) {
+        call_rcu(&old->rcu, free_session_rcu);
+    } else {
+        call_rcu(&old->rcu, free_node_only_rcu);
     }
-    call_rcu(&old->rcu, create_session_rcu);
     return err;
 
 release_lock:
@@ -334,25 +365,17 @@ release_lock:
  * corresponding hashset.
  */
 int registry_add_sector(dev_t dev, sector_t sector, bool *added) {
-    rcu_read_lock();
-    bool registered = false;
-    struct snapshot_metadata *it;
-    struct session *s = NULL;
-    list_for_each_entry_rcu(it, &registry_db, list) {
-        s = it->session;
-        registered = s && s->dev == dev;
-        if (registered) {
-            break;
-        }
-    }
-    int err;
-    if (!registered) {
-        err = -ENOSSN;
-        goto out;
-    }
     if (added) {
         *added = false;
     }
+    rcu_read_lock();
+    struct snapshot_metadata *it = registry_get_by(by_dev, &dev);
+    int err;
+    if (!it) {
+        err = -ENOSSN;
+        goto out;
+    }
+    struct session *s = it->session;
     err = hashset_add(&s->hashset, sector, added);
 out:
     rcu_read_unlock();
@@ -361,59 +384,40 @@ out:
 
 int registry_lookup_sector(dev_t dev, sector_t sector, bool *present) {
     rcu_read_lock();
-    bool registered = false;
-    struct snapshot_metadata *it;
-    struct session *s = NULL;
-    list_for_each_entry_rcu(it, &registry_db, list) {
-        s = it->session;
-        registered = s && s->dev == dev;
-        if (registered) {
-            break;
-        }
-    }
+    struct snapshot_metadata *it = registry_get_by(by_dev, &dev);
     *present = false;
     int err;
-    if (!registered) {
+    if (!it) {
         err = -ENOSSN;
     } else {
-        err = 0;
+        struct session *s = it->session;
         *present = hashset_lookup(&s->hashset, sector);
+        err = 0;
     }
     rcu_read_unlock();
     return err;
 }
 
-bool registry_get_session_id(dev_t dev, char *id, bool *has_dir) {
+bool registry_has_directory(dev_t dev, char *dirname, bool *has_dir) {
     rcu_read_lock();
     bool found = false;
-    struct snapshot_metadata *it;
-    list_for_each_entry_rcu(it, &registry_db, list) {
+    struct snapshot_metadata *it = registry_get_by(by_dev, &dev);
+    if (!it) {
         struct session *s = it->session;
-        found = s && s->dev == dev;
-        if (found) {
-            strncpy(id, s->id, UUID_STRING_LEN + 1);
-            *has_dir = s->has_dir;
-            break;
-        }
+        strncpy(dirname, s->id, UUID_STRING_LEN + 1);
+        *has_dir = s->has_dir;
     }
     rcu_read_unlock();
     return found;
 }
 
-static void end_session_rcu(struct rcu_head *head) {
-    struct snapshot_metadata *node = container_of(head, struct snapshot_metadata, rcu);
-    struct session *s = node->session;
-    if (!s->mntpoints) {
-        session_destroy(s);
-    }
-    kfree(node);
-}
-
 /**
- * registry_end_session detaches the current session from the node associated
- * to the device number dev.
+ * registry_destroy_session detaches the current session from the node associated
+ * to the device number dev. This function is used only when a function responsible to
+ * fill a super block fails, so it is safe to assume that the session is not used by other
+ * processes.
  */
-void registry_end_session(dev_t dev) {
+void registry_destroy_session(dev_t dev) {
     struct snapshot_metadata *new_node = node_alloc_noname(GFP_KERNEL);
     if (!new_node) {
         pr_debug(pr_format("out of memory"));
@@ -422,18 +426,9 @@ void registry_end_session(dev_t dev) {
 
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
-    bool found = false;
-    struct snapshot_metadata *it;
-    list_for_each_entry_rcu(it, &registry_db, list) {
-        struct session *s = it->session;
-        found = s && s->dev == dev;
-        if (found) {
-            break;
-        }
-    }
-
+    struct snapshot_metadata *it = registry_get_by(by_dev, &dev);
     int err = 0;
-    if (!found) {
+    if (!it) {
         err = -ENOSSN;
         goto no_session;
     }
@@ -441,13 +436,11 @@ void registry_end_session(dev_t dev) {
     new_node->dev_name = it->dev_name;
     new_node->dev_name_hash = it->dev_name_hash;
     memcpy(new_node->password, it->password, SHA1_HASH_LEN);
+    
     struct session *s = it->session;
-    s->mntpoints--;
-    if (s->mntpoints) {
-        new_node->session = s;
-    } else {
-        new_node->session = NULL;
-    }
+    WARN(s->mntpoints != 1, "usage counter of session '%s' is %d, expected 1\n", s->id, s->mntpoints);
+    
+    new_node->session = NULL;
 
     list_replace_rcu(&it->list, &new_node->list);
 
@@ -456,8 +449,64 @@ no_session:
     if (err) {
         kfree(new_node);
     } else {
-        call_rcu(&it->rcu, end_session_rcu);
+        call_rcu(&it->rcu, free_session_rcu);
     }
+}
+
+/**
+ * registry_put_session attempts to decrement the usage counter of a session associated
+ * to device number dev. Once the counter drops to zero, the corresponding session isn't free
+ * immediately but it can be replaced by a new session if an appropriate device is mounted in the system.
+ */
+int registry_session_put(dev_t dev) {
+    // We cannot allocate memory inside the spinlock (if we use GFP_KERNEL)
+    // so we preventively allocate memory here
+    struct snapshot_metadata *node = node_alloc_noname(GFP_KERNEL);
+    if (!node) {
+        pr_debug(pr_format("out of memory"));
+        return -ENOMEM;
+    }
+
+    // it indicates that there is no need for an update so we can deallocate
+    // the memory previously allocated
+    bool free_node = false;
+    unsigned long flags;
+    spin_lock_irqsave(&write_lock, flags);
+    int err;
+    struct snapshot_metadata *old = registry_get_by(by_dev, &dev);
+    if (!old) {
+        pr_debug(pr_format("no device associated to %d,%d"), MAJOR(dev), MINOR(dev));
+        free_node = true;
+        err = -ENODEV;
+        goto unlock;
+    }
+    struct session *s = old->session;
+    if (WARN(!s, "no session associated to %d,%d", MAJOR(dev), MINOR(dev))) {
+        free_node = true;
+        err = -ENOSSN;
+        goto unlock;
+    }
+    if (WARN(!s->mntpoints, "usage count for session %s is already 0", s->id)) {
+        free_node = true;
+        err = -1;
+        goto unlock;
+    }
+
+    node->dev_name = old->dev_name;
+    node->dev_name_hash = old->dev_name_hash;
+    memcpy(node->password, old->password, SHA1_HASH_LEN);
+    s->mntpoints--;
+    node->session = s;
+    list_replace_rcu(&old->list, &node->list);
+
+unlock:
+    spin_unlock_irqrestore(&write_lock, flags);
+    if (free_node) {
+        kfree(node);
+    } else {
+        call_rcu(&old->rcu, free_node_only_rcu);
+    }
+    return 0;
 }
 
 static inline ssize_t length(struct snapshot_metadata *it) {
@@ -499,17 +548,10 @@ ssize_t registry_show_session(char *buf, size_t size) {
         }
     }
     rcu_read_unlock();
-    if (err) {
-        if (br + strlen("EOF") < size) {
-            br += sprintf(&buf[br], "EOF");
-        }
+    if (err && br + strlen("EOF") < size) {
+        br += sprintf(&buf[br], "EOF");
     }
     return br;
-}
-
-static void node_update_rcu(struct rcu_head *head) {
-    struct snapshot_metadata *node = container_of(head, struct snapshot_metadata, rcu);
-    kfree(node);
 }
 
 /**
@@ -526,7 +568,7 @@ void registry_update_dir(dev_t dev, const char *session) {
 
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
-    struct snapshot_metadata *old_node = get_by_dev(dev);
+    struct snapshot_metadata *old_node = registry_get_by(by_dev, &dev);
     int err = 0;
     if (!old_node) {
         err = -ENOSSN;
@@ -548,5 +590,5 @@ void registry_update_dir(dev_t dev, const char *session) {
 
 release_lock:
     spin_unlock_irqrestore(&write_lock, flags);
-    call_rcu(&old_node->rcu, node_update_rcu);
+    call_rcu(&old_node->rcu, free_node_only_rcu);
 }

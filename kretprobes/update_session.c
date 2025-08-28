@@ -9,7 +9,7 @@ static inline int try_update_loop_dev(struct block_device *bdev, char *buf) {
     if (IS_ERR(ip)) {
         return PTR_ERR(ip);
     } else {
-        return registry_create_session(ip, bdev->bd_dev);
+        return registry_session_get(ip, bdev->bd_dev);
     }
 }
 
@@ -18,7 +18,7 @@ static inline int try_update_loop_dev(struct block_device *bdev, char *buf) {
  * updates the registry with the device number associated to the image.
  * Returns 0 on success, < 0 otherwise. Possible errors are -ENOMEM if it is not possible to make
  * enough space to hold the path of the image file or if the update operation to the registry fails
- * (see registry_create_session for more details).
+ * (see registry_session_get for more details).
  */
 static int registry_update_loop_device(struct block_device *bdev) {
     char *buf = kmalloc(PATH_MAX, GFP_ATOMIC);
@@ -35,7 +35,7 @@ int update_session(const char *dev_name, struct block_device *bdev) {
     if (is_loop_device(bdev)) {
         err = registry_update_loop_device(bdev);
     } else {
-        err = registry_create_session(dev_name, bdev->bd_dev);
+        err = registry_session_get(dev_name, bdev->bd_dev);
     }
     if (err) {
         pr_debug(pr_format("cannot update device major=%d,minor=%d, got error %d"), MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev), err);

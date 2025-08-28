@@ -1,6 +1,6 @@
 #include "kretprobe_handlers.h"
 #include "pr_format.h"
-#include "registry_lookup.h"
+#include "registry.h"
 #include <linux/blkdev.h>
 #include <linux/path.h>
 #include <linux/printk.h>
@@ -28,6 +28,6 @@ int path_umount_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
         return 0;
     }
     dev_t *dev = (dev_t*)kp->data;
-    pr_debug(pr_format("device %d,%d has been unmounted successfully"), MAJOR(*dev), MINOR(*dev));
+    registry_session_put(*dev);
     return 0;
 }

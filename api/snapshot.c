@@ -146,7 +146,7 @@ static void save_page(struct work_struct *work) {
         goto no_session;
     }
     bool has_dir;
-    if (!registry_get_session_id(w->devno, session, &has_dir)) {
+    if (!registry_has_directory(w->devno, session, &has_dir)) {
         goto no_session;
     }
     if (!has_dir) {

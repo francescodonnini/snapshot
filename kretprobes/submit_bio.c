@@ -39,10 +39,9 @@ static struct bio *create_dummy_bio(struct bio *orig_bio) {
     return dummy;
 }
 
-static bool empty_write(struct bio *bio) {
+static inline bool empty_write(struct bio *bio) {
     return op_is_write(bio->bi_opf)
-           && (bio->bi_iter.bi_size == 0
-               || bio->bi_vcnt == 0);
+           && (bio->bi_iter.bi_size == 0 || bio->bi_vcnt == 0);
 }
 
 /**
@@ -56,8 +55,8 @@ static bool empty_write(struct bio *bio) {
  */
 static bool skip_handler(struct bio *bio) {
     if (!bio
-    || !op_is_write(bio->bi_opf)
-    || empty_write(bio)) {
+        || !op_is_write(bio->bi_opf)
+        || empty_write(bio)) {
         return true;
     }
     bool present;

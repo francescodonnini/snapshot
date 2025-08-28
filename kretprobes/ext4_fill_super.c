@@ -36,7 +36,7 @@ int ext4_fill_super_handler(struct kretprobe_instance *kp, struct pt_regs *regs)
     dev_t *dev = (dev_t*)kp->data;
     // The session has to be destroyed if the mount operation fails
     if (err) {
-        registry_end_session(*dev);
+        registry_destroy_session(*dev);
         pr_debug(pr_format("cannot fill super block of device %d,%d, got error %d"), MAJOR(*dev), MINOR(*dev), err);
     }
     return 0;

@@ -24,7 +24,7 @@ int registry_lookup_sector(dev_t dev, sector_t sector, bool *present);
 
 ssize_t registry_show_session(char *buf, size_t size);
 
-bool registry_get_session_id(dev_t dev, char *id, bool *has_dir);
+bool registry_has_directory(dev_t dev, char *id, bool *has_dir);
 
 int registry_insert(const char *dev_name, const char *password);
 
@@ -32,10 +32,12 @@ int registry_delete(const char *dev_name, const char *password);
 
 bool registry_lookup_active(dev_t dev);
 
-int registry_create_session(const char *dev_name, dev_t dev);
-
 void registry_update_dir(dev_t dev, const char *session);
 
-void registry_end_session(dev_t dev);
+int registry_session_get(const char *dev_name, dev_t dev); 
+
+int registry_session_put(dev_t dev);
+
+void registry_destroy_session(dev_t dev);
 
 #endif
