@@ -129,6 +129,7 @@ static char *create_path(const char *session, sector_t sector) {
 
 static void save_page(struct work_struct *work) {
     struct save_work *w = container_of(work, struct save_work, work);
+    pr_debug(pr_format("save_page: device=%d:%d,sector=%llu"), MAJOR(w->devno), MINOR(w->devno), w->sector);
     bool added;
     int err = registry_add_sector(w->devno, w->sector, &added);
     if (err) {
