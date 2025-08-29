@@ -43,7 +43,9 @@ int mount_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     char **data = (char**)kp->data;
     struct block_device *bdev;
     if (d_bdev_safe(dentry, &bdev)) {
-        update_session(*data, bdev);
+        if (update_session(*data, bdev)) {
+            pr_debug(pr_format("cannot create or update session of device %s"), *data);
+        }
     }
     return 0;
 }

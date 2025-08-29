@@ -290,13 +290,16 @@ static void free_session_rcu(struct rcu_head *head) {
  * It's called in kretprobe context.
  */
 int registry_session_get(const char *dev_name, dev_t dev) {
+    pr_debug(pr_format("%s, %d:%d"), dev_name, MAJOR(dev), MINOR(dev));
     struct snapshot_metadata *node = node_alloc_noname(GFP_KERNEL);
     if (!node) {
+        pr_debug(pr_format("out of memory"));
         return -ENOMEM;
     }
     // WARNING: it is possibile that this function sleeps (it uses kmalloc(GFP_KERNEL))
     struct session *session = session_create(dev);
     if (!session) {
+        pr_debug(pr_format("out of memory"));
         kfree(node);
         return -ENOMEM;
     }
@@ -307,7 +310,7 @@ int registry_session_get(const char *dev_name, dev_t dev) {
     spin_lock_irqsave(&write_lock, flags);
     struct snapshot_metadata *old = get_by_name(dev_name);
     if (!old) {
-        pr_debug(pr_format("no session associated to device=%s,%d:%d"), dev_name, MAJOR(dev), MINOR(dev));
+        pr_debug(pr_format("no device associated to device=%s,%d:%d"), dev_name, MAJOR(dev), MINOR(dev));
         err = -EWRONGCRED;
         goto release_lock;
     }
@@ -402,7 +405,8 @@ bool registry_has_directory(dev_t dev, char *dirname, bool *has_dir) {
     rcu_read_lock();
     bool found = false;
     struct snapshot_metadata *it = registry_get_by(by_dev, &dev);
-    if (!it) {
+    found = it != NULL;
+    if (found) {
         struct session *s = it->session;
         strncpy(dirname, s->id, UUID_STRING_LEN + 1);
         *has_dir = s->has_dir;

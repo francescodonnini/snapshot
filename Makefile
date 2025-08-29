@@ -27,6 +27,7 @@ PWD := $(CURDIR)
 ccflags-y += -I$(src)/include
 
 CFLAGS_api/snapshot.o += -DDEBUG
+CFLAGS_api/registry_rcu.o += -DDEBUG
 CFLAGS_bio/dbg_dump_bio.o += -DDEBUG
 CFLAGS_kretprobes/ext4_fill_super.o += -DDEBUG
 CFLAGS_kretprobes/mount_bdev.o += -DDEBUG

@@ -120,6 +120,7 @@ static int mkdir_session(const char *session) {
     } else {
         dput(dentry);
     }
+    
 out_unlock_put:
     inode_unlock(d_inode(d_parent));
     path_put(&parent);
@@ -172,7 +173,7 @@ static void save_page(struct work_struct *work) {
         goto free_session;
     }
     struct page_iter *it = &w->iter;
-    struct file *fp = filp_open(path, O_CREAT | O_WRONLY, 0664);
+    struct file *fp = filp_open(path, O_CREAT | O_WRONLY, 0755);
     if (IS_ERR(fp)) {
         pr_debug(pr_format("cannot open file: '%s', got error %ld"), path, PTR_ERR(fp));
         goto no_file;
