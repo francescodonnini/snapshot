@@ -48,34 +48,34 @@ static void read_original_block_end_io(struct bio *bio) {
     bio_put(bio);
 }
 
-static inline int __add_page(struct bio *bio, int i, struct page *page, unsigned int len, unsigned int offset) {
-    struct bio_private_data *p = bio->bi_private;
-    if (i >= p->nr_pages) {
-        pr_err("cannot add page to bio's private data: max number of page(s) is %d", p->nr_pages);
-        return -1;
-    }
-    p->iter[i].page = page;
-    p->iter[i].len = len;
-    p->iter[i].offset = offset;
-    return 0;
-}
-
 /**
  * add_page adds pages to the read bio and its private data, the former needs the pages to write the data it reads from disk, the
  * latter save the page content in the /snapshots directory.
  */
 static inline int add_page(struct bio_vec *bvec, struct bio *bio, int i) {
-    struct page *page = alloc_page(GFP_KERNEL);
+    struct bio_private_data *p = bio->bi_private;
+    if (i >= p->iter_len) {
+        pr_err("cannot add page to bio's private data: max number of page(s) is %d", p->iter_len);
+        return 0;
+    }
+
+    int order = get_order(bvec->bv_len);
+    struct page *page = alloc_pages(GFP_KERNEL, order);
     if (!page) {
         return -ENOMEM;
     }
+    
     int err = bio_add_page(bio, page, bvec->bv_len, bvec->bv_offset);
     if (err != bvec->bv_len) {
         pr_err("bio_add_page failed");
-        __free_page(page);
-        return -1;
+        __free_pages(page, order);
+        return 0;
     }
-    return __add_page(bio, i, page, bvec->bv_len, bvec->bv_offset);
+
+    p->iter[i].len = bvec->bv_len;
+    p->iter[i].offset = bvec->bv_offset;
+    p->iter[i].page = page;
+    return bvec->bv_len;
 }
 
 static int allocate_pages(struct bio *bio, struct bio *orig_bio) {
@@ -87,18 +87,18 @@ static int allocate_pages(struct bio *bio, struct bio *orig_bio) {
 	struct bvec_iter it;
     bio_for_each_bvec(bvec, orig_bio, it) {
         int err = add_page(&bvec, bio, count);
-        if (err) {
-            goto allocate_pages_out;
+        if (err != bvec.bv_len) {
+            goto out;
         }
         ++count;
     }
     memcpy(&orig_bio->bi_iter, &old, sizeof(struct bvec_iter));
     return err;
 
-allocate_pages_out:
+out:
     struct bio_private_data *p = bio->bi_private;
     for (int i = 0; i < count; ++i) {
-        __free_page(p->iter[i].page);
+        __free_pages(p->iter[i].page, get_order(p->iter[i].len));
     }
     return err;
 }
@@ -116,7 +116,7 @@ static struct bio* create_read_bio(struct bio *orig_bio) {
         return NULL;
     }
     data->orig_bio = orig_bio;
-    data->nr_pages = orig_bio->bi_vcnt;
+    data->iter_len = orig_bio->bi_vcnt;
     sector_t sector = bio_sector(orig_bio);
     data->sector = sector;
     struct bio *read_bio = bio_alloc(orig_bio->bi_bdev, orig_bio->bi_vcnt, REQ_OP_READ, GFP_KERNEL);

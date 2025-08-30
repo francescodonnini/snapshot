@@ -17,7 +17,7 @@ struct page_iter {
 struct bio_private_data {
     struct bio       *orig_bio;
     sector_t          sector;
-    int               nr_pages;
+    int               iter_len;
     struct page_iter  iter[];
 };
 

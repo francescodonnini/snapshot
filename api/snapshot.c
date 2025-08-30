@@ -100,12 +100,12 @@ static int mkdir_session(const char *session) {
     struct dentry *dentry = lookup_one_len(session, d_parent, strlen(session));
     if (IS_ERR(dentry)) {
         err = PTR_ERR(dentry);
-        pr_err("lookup_one_len failed on '%s', got error %d (%s)"), session, err, errtoa(err);
+        pr_err("lookup_one_len failed on '%s', got error %d (%s)", session, err, errtoa(err));
         goto out_unlock_put;
     }
     
     if (d_really_is_positive(dentry)) {
-        pr_debug("%s/%s already exists", ROOT_DIR, session);
+        pr_debug(pr_format("%s/%s already exists"), ROOT_DIR, session);
         dput(dentry);
         goto out_unlock_put;
     }
@@ -133,15 +133,13 @@ static char *create_path(const char *session, sector_t sector) {
     }
     int ret = snprintf(path, n, "/snapshots/%s/%llu", session, sector);
     if (ret >= n) {
-        pr_err("failed to sprintf path of snapshot's block, function return(%d) and destination len was %d", ret, n);
+        pr_err("failed to sprintf path of snapshot's block, function return(%d) and destination len was %lu", ret, n);
     }
     return path;
 }
 
 static void save_page(struct work_struct *work) {
     struct save_work *w = container_of(work, struct save_work, work);
-    
-    pr_debug(pr_format("save_page: device=%d:%d,sector=%llu"), MAJOR(w->devno), MINOR(w->devno), w->sector);
     
     bool added;
     int err = registry_add_sector(w->devno, w->sector, &added);
@@ -180,14 +178,9 @@ static void save_page(struct work_struct *work) {
         pr_err("cannot open file: %s, got error %ld", path, PTR_ERR(fp));
         goto no_file;
     }
-    if (it->offset + it->len > PAGE_SIZE) {
-        pr_err("out of page bound: [%d, %d)", it->offset, it->len);
-        goto no_file;
-    }
-    void *va = kmap_local_page(it->page);
+    void *va = page_address(it->page);
     loff_t off = 0;
     ssize_t n = kernel_write(fp, va + it->offset, it->len, &off);
-    kunmap_local(va);
     if (n != it->len) {
         pr_err("kernel_write failed to write whole page at %s", path);
     }
@@ -200,7 +193,7 @@ no_file:
 free_session:
     kfree(session);
 no_session:
-    __free_page(w->iter.page);
+    __free_pages(w->iter.page, get_order(w->iter.len));
     kfree(w);
 }
 
@@ -222,7 +215,7 @@ void snapshot_save(struct bio *bio) {
     dev_t dev = bio_devno(bio);
     sector_t sector = bio_sector(bio);
     struct bio_private_data *p = bio->bi_private;
-    for (int i = 0; i < p->nr_pages; ++i) {
+    for (int i = 0; i < p->iter_len; ++i) {
         struct page_iter *it = &p->iter[i];
         int err = add_work(dev, sector, it);
         if (err == -ENOMEM) {
