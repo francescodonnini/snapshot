@@ -376,6 +376,7 @@ int registry_add_sector(dev_t dev, sector_t sector, bool *added) {
     int err;
     if (!it) {
         err = -ENOSSN;
+        pr_err("no session associated to device %d:%d", MAJOR(dev), MINOR(dev));
         goto out;
     }
     struct session *s = it->session;

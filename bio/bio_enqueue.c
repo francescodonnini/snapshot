@@ -20,7 +20,7 @@ static struct workqueue_struct *wq;
 int bio_deferred_work_init(void) {
     wq = alloc_ordered_workqueue("bio_wq", 0);
     if (!wq) {
-        pr_debug(pr_format("cannot create wq for bio(s)"));
+        pr_err("out of memory");
         return -ENOMEM;
     }
     return 0;
@@ -39,7 +39,7 @@ static void read_original_block_end_io(struct bio *bio) {
     if (bio->bi_status == BLK_STS_OK) {
         snapshot_save(bio);
     } else {
-        pr_debug(pr_format("bio completed with error %d"), bio->bi_status);
+        pr_err("bio completed with error %d", bio->bi_status);
     }
 
     struct bio_private_data *p = bio->bi_private;
@@ -51,7 +51,7 @@ static void read_original_block_end_io(struct bio *bio) {
 static inline int __add_page(struct bio *bio, int i, struct page *page, unsigned int len, unsigned int offset) {
     struct bio_private_data *p = bio->bi_private;
     if (i >= p->nr_pages) {
-        pr_debug(pr_format("trying to add too much pages to bio block private data"));
+        pr_err("cannot add page to bio's private data: max number of page(s) is %d", p->nr_pages);
         return -1;
     }
     p->iter[i].page = page;
@@ -71,7 +71,7 @@ static inline int add_page(struct bio_vec *bvec, struct bio *bio, int i) {
     }
     int err = bio_add_page(bio, page, bvec->bv_len, bvec->bv_offset);
     if (err != bvec->bv_len) {
-        pr_debug(pr_format("bio_add_page failed with error %d"), bvec->bv_len);
+        pr_err("bio_add_page failed");
         __free_page(page);
         return -1;
     }
@@ -112,7 +112,7 @@ static struct bio* create_read_bio(struct bio *orig_bio) {
     size_t size = sizeof(*data) + sizeof(struct page_iter) * orig_bio->bi_vcnt;
     data = kzalloc(size, GFP_KERNEL);
     if (!data) {
-        pr_debug(pr_format("out of memory"));
+        pr_err("out of memory");
         return NULL;
     }
     data->orig_bio = orig_bio;
@@ -121,29 +121,27 @@ static struct bio* create_read_bio(struct bio *orig_bio) {
     data->sector = sector;
     struct bio *read_bio = bio_alloc(orig_bio->bi_bdev, orig_bio->bi_vcnt, REQ_OP_READ, GFP_KERNEL);
     if (!read_bio) {
-        pr_debug(pr_format("bio_alloc failed"));
+        pr_err("bio_alloc failed");
         goto no_bio;
     }
     read_bio->bi_iter.bi_sector = sector;
     read_bio->bi_end_io = read_original_block_end_io;
     read_bio->bi_private = data;
     if (allocate_pages(read_bio, orig_bio)) {
-        pr_debug(pr_format("allocate_pages failed"));
         goto no_pages;
     }
     return read_bio;
+
 no_pages:
     bio_put(read_bio);
 no_bio:
     kfree(data);
     return NULL;
-
 }
 
 static void process_bio(struct work_struct *work) {
     struct bio_work *w = container_of(work, struct bio_work, work);
     struct bio *orig_bio = w->orig_bio;
-    dbg_dump_bio("processing write bio:\n", orig_bio);
     struct bio *rb = create_read_bio(orig_bio);
     if (!rb) {
         submit_bio(orig_bio);
@@ -156,14 +154,14 @@ static void process_bio(struct work_struct *work) {
 /**
  * bio_enqueue schedules a (write) bio for deferred work.
  */
-bool bio_enqueue(struct bio *bio) {
+void bio_enqueue(struct bio *bio) {
     struct bio_work *w;
     w = kzalloc(sizeof(*w), GFP_KERNEL);
     if (!w) {
-        pr_debug(pr_format("cannot create bio_work struct for device (%d, %d)"), MAJOR(bio_devno(bio)), MINOR(bio_devno(bio)));
-        return false;
+        pr_err("out of memory");
+        return;
     }
     w->orig_bio = bio;
     INIT_WORK(&w->work, process_bio);
-    return queue_work(wq, &w->work);
+    queue_work(wq, &w->work);
 }

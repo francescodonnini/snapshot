@@ -31,7 +31,7 @@ static int mkdir_snapshots(void) {
     struct path parent;
     int err = kern_path("/", LOOKUP_DIRECTORY, &parent);
     if (err) {
-        pr_debug(pr_format("kern_path failed on '/', got error %d (%s)"), err, errtoa(err));
+        pr_err("kern_path failed on '/', got error %d (%s)", err, errtoa(err));
         return err;
     }
 
@@ -40,7 +40,7 @@ static int mkdir_snapshots(void) {
     struct dentry *dentry = lookup_one_len("snapshots", d_parent, strlen("snapshots"));
     if (IS_ERR(dentry)) {
         err = PTR_ERR(dentry);
-        pr_debug(pr_format("lookup_one_len failed on 'snapshots', got error %d (%s)"), err, errtoa(err));
+        pr_err("lookup_one_len failed on 'snapshots', got error %d (%s)", err, errtoa(err));
         goto out_unlock_put;
     }
 
@@ -53,7 +53,7 @@ static int mkdir_snapshots(void) {
     dentry = vfs_mkdir(mnt_idmap(parent.mnt), d_inode(d_parent), dentry, 0755);
     if (IS_ERR(dentry)) {
         err = PTR_ERR(dentry);
-        pr_debug(pr_format("vfs_mkdir failed on '%s', got error %d (%s)"), ROOT_DIR, err, errtoa(err));
+        pr_err("vfs_mkdir failed on '%s', got error %d (%s)", ROOT_DIR, err, errtoa(err));
     } else {
         dput(dentry);
     }
@@ -72,7 +72,7 @@ out_unlock_put:
 int snapshot_init(void) {
     queue = alloc_workqueue("save_files_wq", WQ_UNBOUND | WQ_MEM_RECLAIM, 0);
     if (!queue) {
-        pr_debug(pr_format("cannot create workqueue to save file(s)"));
+        pr_err("cannot create workqueue to save file(s)");
         return -ENOMEM;
     }
     int err = mkdir_snapshots();
@@ -91,7 +91,7 @@ static int mkdir_session(const char *session) {
     struct path parent;
     int err = kern_path(ROOT_DIR, LOOKUP_DIRECTORY, &parent);
     if (err) {
-        pr_debug(pr_format("%s does not exist, got error %d (%s)"), ROOT_DIR, err, errtoa(err));
+        pr_err("%s does not exist, got error %d (%s)", ROOT_DIR, err, errtoa(err));
         return err;
     }
 
@@ -100,14 +100,12 @@ static int mkdir_session(const char *session) {
     struct dentry *dentry = lookup_one_len(session, d_parent, strlen(session));
     if (IS_ERR(dentry)) {
         err = PTR_ERR(dentry);
-        pr_debug(pr_format("lookup_one_len failed on %s, got error %d (%s)"),
-                 session, err, errtoa(err));
+        pr_err("lookup_one_len failed on '%s', got error %d (%s)"), session, err, errtoa(err);
         goto out_unlock_put;
     }
     
     if (d_really_is_positive(dentry)) {
-        // Already exists!
-        pr_debug(pr_format("%s/%s already exists"), ROOT_DIR, session);
+        pr_debug("%s/%s already exists", ROOT_DIR, session);
         dput(dentry);
         goto out_unlock_put;
     }
@@ -115,8 +113,7 @@ static int mkdir_session(const char *session) {
     dentry = vfs_mkdir(mnt_idmap(parent.mnt), d_inode(d_parent), dentry, 0755);
     if (IS_ERR(dentry)) {
         err = PTR_ERR(dentry);
-        pr_debug(pr_format("vfs_mkdir failed on '%s/%s', got error %d (%s)"),
-                 ROOT_DIR, session, err, errtoa(err));
+        pr_err("vfs_mkdir failed on '%s/%s', got error %d (%s)", ROOT_DIR, session, err, errtoa(err));
     } else {
         dput(dentry);
     }
@@ -134,31 +131,36 @@ static char *create_path(const char *session, sector_t sector) {
         pr_debug(pr_format("out of memory"));
         return NULL;
     }
-    sprintf(path, "/snapshots/%s/%llu", session, sector);
+    int ret = snprintf(path, n, "/snapshots/%s/%llu", session, sector);
+    if (ret >= n) {
+        pr_err("failed to sprintf path of snapshot's block, function return(%d) and destination len was %d", ret, n);
+    }
     return path;
 }
 
 static void save_page(struct work_struct *work) {
     struct save_work *w = container_of(work, struct save_work, work);
+    
     pr_debug(pr_format("save_page: device=%d:%d,sector=%llu"), MAJOR(w->devno), MINOR(w->devno), w->sector);
+    
     bool added;
     int err = registry_add_sector(w->devno, w->sector, &added);
     if (err) {
-        pr_debug(pr_format("registry_lookup_sector completed with error %d"), err);
         goto no_session;
     }
     if (!added) {
-        pr_debug(pr_format("a snapshot of this region (#%llu) has already been made"), w->sector);
+        pr_debug(pr_format("sector %llu has already been registered to device %d:%d"), w->sector, MAJOR(w->devno), MINOR(w->devno));
         goto no_session;
     }
+    
     char *session = kzalloc(UUID_STRING_LEN + 1, GFP_KERNEL);
     if (!session) {
-        pr_debug(pr_format("out of memory"));
+        pr_err("out of memory");
         goto no_session;
     }
     bool has_dir;
     if (!registry_has_directory(w->devno, session, &has_dir)) {
-        pr_debug(pr_format("no session associated to device %d:%d"), MAJOR(w->devno), MINOR(w->devno));
+        pr_err("no session associated to device %d:%d", MAJOR(w->devno), MINOR(w->devno));
         goto no_session;
     }
     if (!has_dir) {
@@ -175,11 +177,11 @@ static void save_page(struct work_struct *work) {
     struct page_iter *it = &w->iter;
     struct file *fp = filp_open(path, O_CREAT | O_WRONLY, 0755);
     if (IS_ERR(fp)) {
-        pr_debug(pr_format("cannot open file: '%s', got error %ld"), path, PTR_ERR(fp));
+        pr_err("cannot open file: %s, got error %ld", path, PTR_ERR(fp));
         goto no_file;
     }
     if (it->offset + it->len > PAGE_SIZE) {
-        pr_debug(pr_format("out of page bound: [%d, %d)"), it->offset, it->len);
+        pr_err("out of page bound: [%d, %d)", it->offset, it->len);
         goto no_file;
     }
     void *va = kmap_local_page(it->page);
@@ -187,11 +189,11 @@ static void save_page(struct work_struct *work) {
     ssize_t n = kernel_write(fp, va + it->offset, it->len, &off);
     kunmap_local(va);
     if (n != it->len) {
-        pr_debug(pr_format("kernel_write failed to write whole page at '%s'"), path);
+        pr_err("kernel_write failed to write whole page at %s", path);
     }
     err = filp_close(fp, NULL);
     if (err) {
-        pr_debug(pr_format("filp_close failed to close file at '%s', got error %d"), path, err);
+        pr_err("filp_close failed to close file at %s, got error %d", path, err);
     }
 no_file:
     kfree(path);
@@ -206,7 +208,7 @@ static int add_work(dev_t devno, sector_t sector, struct page_iter *it) {
     struct save_work *w;
     w = kzalloc(sizeof(*w), GFP_KERNEL);
     if (!w) {
-        pr_debug(pr_format("add_work failed for device=%d:%d, sector=%llu"), MAJOR(devno), MINOR(devno), sector);
+        pr_err("out of memory");
         return -ENOMEM;
     }
     memcpy(&w->iter, it, sizeof(*it));
@@ -217,7 +219,6 @@ static int add_work(dev_t devno, sector_t sector, struct page_iter *it) {
 }
 
 void snapshot_save(struct bio *bio) {
-    dbg_dump_bio("saving bio:\n", bio);
     dev_t dev = bio_devno(bio);
     sector_t sector = bio_sector(bio);
     struct bio_private_data *p = bio->bi_private;

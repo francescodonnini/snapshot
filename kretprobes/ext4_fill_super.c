@@ -25,7 +25,6 @@ int ext4_fill_super_entry_handler(struct kretprobe_instance *kp, struct pt_regs 
     if (update_session(fc->source, bdev)) {
         return -1;
     }
-    pr_debug(pr_format("session for device '%s' %d,%d has been created successfully"), fc->source, MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev));
     dev_t *data = (dev_t*)kp->data;
     *data = bdev->bd_dev;
     return 0;
