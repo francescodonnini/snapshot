@@ -134,6 +134,8 @@ static char *create_path(const char *session, sector_t sector) {
     int ret = snprintf(path, n, "/snapshots/%s/%llu", session, sector);
     if (ret >= n) {
         pr_err("failed to sprintf path of snapshot's block, function return(%d) and destination len was %lu", ret, n);
+        kfree(path);
+        return NULL;
     }
     return path;
 }
