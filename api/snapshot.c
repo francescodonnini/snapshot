@@ -219,7 +219,7 @@ void snapshot_save(struct bio *bio) {
         struct page_iter *it = &p->iter[i];
         int err = add_work(dev, sector, it);
         if (err == -ENOMEM) {
-            __free_page(it->page);
+            __free_pages(it->page, get_order(it->len));
         }
         sector += it->len >> 9;
     }
