@@ -5,61 +5,77 @@
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 
-static struct ioctl_params *copy_ioctl_params_from_user(struct ioctl_params *user_buffer) {
-    long err = 0;
-    if (!access_ok(user_buffer, sizeof(struct ioctl_params))) {
-        err = -EINVAL;
-        goto no_buffer;
-    }
-    struct ioctl_params *buffer = kmalloc(sizeof(struct ioctl_params), GFP_KERNEL);
-    if (buffer == NULL) {
-        err = -ENOMEM;
-        goto no_buffer;
-    }
-    long rem = copy_from_user(buffer, user_buffer, sizeof(struct ioctl_params));
-    if (rem < 0) {
-        err = -EINVAL;
-        goto no_ioctl_params_copy;
-    }
-    char *path = kmalloc(buffer->path_len + 1, GFP_KERNEL);
-    if (path == NULL) {
-        err = -ENOMEM;
-        goto no_ioctl_params_copy;
-    }
-    char *password = kmalloc(buffer->password_len + 1, GFP_KERNEL);
-    if (password == NULL) {
-        err = -ENOMEM;
-        goto no_password;
-    }
-    if (!access_ok(buffer->path, buffer->path_len)) {
-        err = -EINVAL;
-        goto no_param_copy;
-    }
-    rem = copy_from_user(path, buffer->path, buffer->path_len);
-    if (rem < 0) {
-        err = -EINVAL;
-        goto no_param_copy;
-    }
+static int copy_password(struct ioctl_params *buffer) {
     if (!access_ok(buffer->password, buffer->password_len)) {
-        err = -EINVAL;
-        goto no_param_copy;
+        return -EINVAL;
     }
-    rem = copy_from_user(password, buffer->password, buffer->password_len);
-    if (rem < 0) {
-        err = -EINVAL;
-        goto no_param_copy;
+    char *password = kzalloc(buffer->password_len + 1, GFP_KERNEL);
+    if (!password) {
+        return -ENOMEM;
+    }
+    unsigned long err = copy_from_user(password, buffer->password, buffer->password_len);
+    if (err < 0) {
+        kfree(password);
+        return -EINVAL;
+    }
+    buffer->password = password;
+    return 0;
+}
+
+static int copy_path(struct ioctl_params *buffer) {
+    if (!access_ok(buffer->path, buffer->path_len)) {
+        return -EINVAL;
+    }
+    char *path = kzalloc(buffer->path_len + 1, GFP_KERNEL);
+    if (!path) {
+        return -ENOMEM;
+    }
+    unsigned long err = copy_from_user(path, buffer->path, buffer->path_len);
+    if (err < 0) {
+        kfree(path);
+        return -EINVAL;
     }
     buffer->path = path;
-    buffer->password = password;
+    return 0;
+}
+
+static int copy_buffer(struct ioctl_params **kernel_buffer, struct ioctl_params *user_buffer) {
+    if (!access_ok(user_buffer, sizeof(*user_buffer))) {
+        return -EINVAL;
+    }
+    struct ioctl_params *buffer = kzalloc(sizeof(*user_buffer), GFP_KERNEL);
+    if (buffer == NULL) {
+        return -ENOMEM;
+    }
+    long err = copy_from_user(buffer, user_buffer, sizeof(*user_buffer));
+    if (err < 0) {
+        kfree(buffer);
+        return -EINVAL;
+    }
+    *kernel_buffer = buffer;
+    return 0;
+}
+
+static struct ioctl_params *copy_params(struct ioctl_params *user_buffer) {
+    struct ioctl_params *buffer;
+    int err = copy_buffer(&buffer, user_buffer);
+    if (err) {
+        goto out;
+    }
+    err = copy_path(buffer);
+    if (err) {
+        goto out;
+    }
+    err = copy_password(buffer);    
+    if (err) {
+        goto no_password;
+    }
     return buffer;
 
-no_param_copy:
-    kfree(password);
 no_password:
-    kfree(path);
-no_ioctl_params_copy:
+    kfree(buffer->path);
+out:
     kfree(buffer);
-no_buffer:
     return ERR_PTR(err);
 }
 
@@ -70,7 +86,7 @@ static void free_kernel_buffer(struct ioctl_params *kernel_buffer) {
 }
 
 static long do_activate(struct ioctl_params *params) {
-    struct ioctl_params *p = copy_ioctl_params_from_user(params);
+    struct ioctl_params *p = copy_params(params);
     if (IS_ERR(p)) {
         return PTR_ERR(p);
     }
@@ -85,7 +101,7 @@ static long do_activate(struct ioctl_params *params) {
 }
 
 static long do_deactivate(struct ioctl_params *params) {
-    struct ioctl_params *p = copy_ioctl_params_from_user(params);
+    struct ioctl_params *p = copy_params(params);
     if (IS_ERR(p)) {
         return PTR_ERR(p);
     }
@@ -101,11 +117,11 @@ static long do_deactivate(struct ioctl_params *params) {
 
 static long check_ioctl_cmd(unsigned int cmd) {
     if (_IOC_TYPE(cmd) != CHRDEV_IOCTL_MAGIC) {
-        pr_debug(pr_format("wrong magic number, expected %d but got %d\n"), CHRDEV_IOCTL_MAGIC, _IOC_TYPE(cmd));
+        pr_err("wrong magic number, expected %d but got %d", CHRDEV_IOCTL_MAGIC, _IOC_TYPE(cmd));
         return -EINVAL;
     }
     if (_IOC_NR(cmd) > CHRDEV_IOCTL_ACTIVATE_MAX_NR) {
-        pr_debug(pr_format("number too high\n"));
+        pr_err("number too high");
         return -EINVAL;
     }
     return 0;
