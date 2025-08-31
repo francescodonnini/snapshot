@@ -4,7 +4,7 @@
 #include "hashset.h"
 #include "kretprobe_handlers.h"
 #include "pr_format.h"
-#include "registry_lookup.h"
+#include "registry.h"
 #include <linux/bio.h>
 #include <linux/types.h>
 
@@ -24,12 +24,13 @@ static void dummy_end_io(struct bio *bio) {
 
 static struct bio *create_dummy_bio(struct bio *orig_bio) {
     struct block_device *bdev = bnull_get_bdev();
-    if (!bdev) {
-        pr_debug(pr_format("bnull instance of struct block_device is NULL"));
+    // if this pointer is NULL then the module shouldn't have been mounted
+    if (WARN(!bdev, "instance of bnull block device is NULL")) {
+        return NULL;
     }
     struct bio *dummy = bio_alloc(bdev, 0, REQ_OP_DISCARD, GFP_ATOMIC);
     if (!dummy) {
-        pr_debug(pr_format("cannot create a dummy bio request for device (%d, %d)\n"), MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev));
+        pr_err("out of memory");
         return NULL;
     }
     dummy->bi_end_io = dummy_end_io;
@@ -40,6 +41,7 @@ static struct bio *create_dummy_bio(struct bio *orig_bio) {
 }
 
 static inline bool empty_write(struct bio *bio) {
+    // empty writes are possible because can be sent as write barriers
     return op_is_write(bio->bi_opf)
            && (bio->bi_iter.bi_size == 0 || bio->bi_vcnt == 0);
 }
@@ -62,14 +64,14 @@ static bool skip_handler(struct bio *bio) {
     bool present;
     dev_t devno;
     if (!bio_denvo_safe(bio, &devno)) {
-        pr_debug(pr_format("cannot read device number from bio struct"));
+        pr_err("cannot read device number from bio struct");
         return true;
     }
     sector_t sector = bio_sector(bio);
     int err = registry_lookup_sector(devno, sector, &present);
     if (err) {
         if (err != -ENOSSN) {
-            pr_debug(pr_format("registry_lookup_sector completed with error %d"), err);
+            pr_err("registry_lookup_sector completed with error %d", err);
         }
         return true;
     }
@@ -93,10 +95,6 @@ static bool skip_handler(struct bio *bio) {
  */
 int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     struct bio *bio = get_arg1(struct bio*, regs);
-    dev_t dev = MKDEV(7,0);
-    if (bio->bi_bdev->bd_dev == dev && op_is_write(bio->bi_opf)) {
-        pr_debug(pr_format("intercepted bio #sector=%llu"), bio->bi_iter.bi_sector);
-    }
     // skip the return handler if at least one of the following conditions apply:
     // * the request is NULL
     // * the request is not for writing;
@@ -108,7 +106,7 @@ int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
     if (dummy_bio) {
         set_arg1(regs, dummy_bio);
     } else {
-        pr_debug(pr_format("cannot create dummy bio"));
+        pr_err("cannot create dummy bio");
     }
     return 0;
 }
