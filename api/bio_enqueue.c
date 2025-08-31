@@ -62,6 +62,7 @@ static inline int add_page(struct bio_vec *bvec, struct bio *bio, int i) {
     int order = get_order(bvec->bv_len);
     struct page *page = alloc_pages(GFP_KERNEL, order);
     if (!page) {
+        pr_err("out of memory");
         return -ENOMEM;
     }
     
@@ -86,7 +87,7 @@ static int allocate_pages(struct bio *bio, struct bio *orig_bio) {
     struct bio_vec bvec;
 	struct bvec_iter it;
     bio_for_each_bvec(bvec, orig_bio, it) {
-        int err = add_page(&bvec, bio, count);
+        err = add_page(&bvec, bio, count);
         if (err != bvec.bv_len) {
             goto out;
         }
