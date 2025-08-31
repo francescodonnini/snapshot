@@ -19,7 +19,7 @@ static const struct rhashtable_params sector_set_params = {
 int hashset_create(struct hashset *set) {
     int err = rhashtable_init(&set->ht, &sector_set_params);
     if (err) {
-        pr_debug(pr_format("cannot initialize block hashtable, got error %d"), err);
+        pr_err("cannot initialize block hashtable, got error %d", err);
     }
     return err;
 }
@@ -36,7 +36,7 @@ void hashset_destroy(struct hashset *set) {
 static inline struct sector_obj *mk_sector_obj(sector_t sector) {
     struct sector_obj *obj = kzalloc(sizeof(struct sector_obj), GFP_KERNEL);
     if (!obj) {
-        return ERR_PTR(-ENOMEM);
+        return NULL;
     }
     obj->key = sector;
     return obj;
