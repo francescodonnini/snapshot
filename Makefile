@@ -5,7 +5,6 @@ snapshot-objs := 	api/activate_snapshot.o \
 					api/deactivate_snapshot.o \
 					api/hash.o \
 					api/loop_utils.o \
-					api/path_utils.o \
 					api/registry_rcu.o \
 					api/hashset_rcu.o \
 					api/session.o \

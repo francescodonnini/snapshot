@@ -3,8 +3,7 @@
 #include <linux/printk.h>
 #include <linux/types.h>
 
-static const char *bio_op_str(struct bio *bio)
-{
+static const char *bio_op_str(struct bio *bio) {
     switch (bio_op(bio)) {
     case REQ_OP_READ:            return "REQ_OP_READ";
     case REQ_OP_WRITE:           return "REQ_OP_WRITE";

@@ -65,7 +65,7 @@ out_unlock_put:
 }
 
 /**
- * snapshot_init -- creates the directory /snapshots if not exists and
+ * snapshot_init creates the directory /snapshots if not exists and
  * initializes the necessary data structures used by this subsystem.
  * @returns 0 on success, <0 otherwise
  */
@@ -125,15 +125,20 @@ out_unlock_put:
 }
 
 static char *create_path(const char *session, sector_t sector) {
-    size_t n = strlen("/snapshots/") + strlen(session) + MAX_NAME_LEN + 2;
-    char *path = kzalloc(n, GFP_KERNEL);
-    if (!path) {
-        pr_debug(pr_format("out of memory"));
+    // 3 because of the the two slash '/' after ROOT_DIR and after session, plus the NUL character
+    size_t n = strlen(ROOT_DIR) + strlen(session) + MAX_NAME_LEN + 3;
+    if (n > PATH_MAX) {
+        pr_err("path too big");
         return NULL;
     }
-    int ret = snprintf(path, n, "/snapshots/%s/%llu", session, sector);
+    char *path = kzalloc(n, GFP_KERNEL);
+    if (!path) {
+        pr_err("out of memory");
+        return NULL;
+    }
+    int ret = snprintf(path, n, "%s/%s/%llu", ROOT_DIR, session, sector);
     if (ret >= n) {
-        pr_err("failed to sprintf path of snapshot's block, function return(%d) and destination len was %lu", ret, n);
+        pr_err("failed to sprintf path of snapshot's block, function return(%d) and destination length was %lu", ret, n);
         kfree(path);
         return NULL;
     }
@@ -141,9 +146,8 @@ static char *create_path(const char *session, sector_t sector) {
 }
 
 static void save_page(struct work_struct *work) {
-    struct save_work *w = container_of(work, struct save_work, work);
-    
     bool added;
+    struct save_work *w = container_of(work, struct save_work, work);
     int err = registry_add_sector(w->devno, w->sector, &added);
     if (err) {
         goto no_session;
@@ -170,12 +174,13 @@ static void save_page(struct work_struct *work) {
             registry_update_dir(w->devno, session);
         }
     }
+
     char *path = create_path(session, w->sector);
     if (!path) {
         goto free_session;
     }
     struct page_iter *it = &w->iter;
-    struct file *fp = filp_open(path, O_CREAT | O_WRONLY, 0755);
+    struct file *fp = filp_open(path, O_CREAT | O_WRONLY, 0644);
     if (IS_ERR(fp)) {
         pr_err("cannot open file: %s, got error %ld", path, PTR_ERR(fp));
         goto no_file;
@@ -190,6 +195,7 @@ static void save_page(struct work_struct *work) {
     if (err) {
         pr_err("filp_close failed to close file at %s, got error %d", path, err);
     }
+
 no_file:
     kfree(path);
 free_session:
@@ -213,6 +219,10 @@ static int add_work(dev_t devno, sector_t sector, struct page_iter *it) {
     return queue_work(queue, &w->work);
 }
 
+/**
+ * snapshot_save schedules each page or compound one of bio to the workqueue. Each page
+ * will be saved to /snapshots/<session id>/<sector no>
+ */
 void snapshot_save(struct bio *bio) {
     dev_t dev = bio_devno(bio);
     sector_t sector = bio_sector(bio);
