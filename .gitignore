@@ -13,6 +13,3 @@
 **/*.symvers.cmd
 /docs/*
 .vscode/c_cpp_properties.json
-test/*
-!test/restore.sh
-logs/*
