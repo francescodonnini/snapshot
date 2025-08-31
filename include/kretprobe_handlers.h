@@ -93,10 +93,6 @@ int path_umount_entry_handler(struct kretprobe_instance *kp, struct pt_regs *reg
 
 int path_umount_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 
-int get_tree_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
-
-int get_tree_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
-
 int ext4_fill_super_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 
 int ext4_fill_super_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
