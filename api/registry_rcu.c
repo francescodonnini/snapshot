@@ -28,7 +28,7 @@ struct snapshot_metadata {
     // speed up searches by making string comparisons only on collisions or matches
     unsigned long     dev_name_hash; 
     char             *dev_name;
-    char             *password;
+    char              password[SHA1_HASH_LEN];
     struct session   *session;
     struct rcu_head   rcu;
 };
@@ -130,14 +130,10 @@ static inline struct snapshot_metadata *get_by_name(const char *name) {
  */
 static inline struct snapshot_metadata *node_alloc_noname(gfp_t gfp) {
     struct snapshot_metadata *node;
-    // size is the number of bytes needed by snapshot metadata + the number of bytes needed to hold the password hash
-    size_t size = sizeof(struct snapshot_metadata)
-                  + ALIGN(SHA1_HASH_LEN, sizeof(void*));
-    node = kzalloc(size, gfp);
+    node = kzalloc(sizeof(*node), gfp);
     if (!node) {
         return NULL;
     }
-    node->password = (char*)node + sizeof(*node);
     INIT_LIST_HEAD(&node->list);
     return node;
 }
@@ -215,6 +211,7 @@ int registry_insert(const char *dev_name, const char *password) {
     }
     spin_unlock_irqrestore(&write_lock, flags);
     if (err) {
+        kfree(node->dev_name);
         kfree(node);
     }
     return err;
