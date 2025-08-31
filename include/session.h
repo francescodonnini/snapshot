@@ -15,8 +15,4 @@ struct session *session_create(dev_t dev);
 
 void session_destroy(struct session *s);
 
-void session_get(struct session *s);
-
-void session_put(struct session *s);
-
 #endif
