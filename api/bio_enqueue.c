@@ -36,12 +36,10 @@ void bio_deferred_work_cleanup(void) {
  * block IO layer
  */
 static void read_original_block_end_io(struct bio *bio) {
-    if (bio->bi_status == BLK_STS_OK) {
-        snapshot_save(bio);
-    } else {
+    if (bio->bi_status != BLK_STS_OK) {
         pr_err("bio completed with error %d", bio->bi_status);
     }
-
+    snapshot_save(bio);
     struct bio_private_data *p = bio->bi_private;
     submit_bio(p->orig_bio);
     kfree(p);
