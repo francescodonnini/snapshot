@@ -1,7 +1,6 @@
 #include "snapshot.h"
 #include "bio_utils.h"
 #include "fast_hash.h"
-#include "path_utils.h"
 #include "pr_format.h"
 #include "registry.h"
 #include <linux/bio.h>
