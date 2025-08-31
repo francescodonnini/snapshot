@@ -107,12 +107,6 @@ static inline bool by_dev(struct snapshot_metadata *node, const void *args) {
     return s && s->dev == *dev;
 }
 
-static inline bool is_active(struct snapshot_metadata *it, const void *args) {
-    dev_t *dev = (dev_t*)args;
-    struct session *s = it->session;
-    return s && s->dev == *dev;
-}
-
 /**
  * get_by_name search a node whose device name is equal to name. It assumes it's called inside
  * a RCU critical section or a while a spinlock is held.
@@ -260,10 +254,6 @@ int registry_delete(const char *dev_name, const char *password) {
     return err;
 }
 
-bool registry_lookup_active(dev_t dev) {
-    return registry_lookup_rcu(is_active, &dev);
-}
-
 static void free_node_only_rcu(struct rcu_head *head) {
     struct snapshot_metadata *node = container_of(head, struct snapshot_metadata, rcu);
     kfree(node);
@@ -383,6 +373,13 @@ out:
     return err;
 }
 
+/**
+ * registry_lookup_sector checks if a certain device associated to device number dev has
+ * already received a write request that targeted a certain sector. It returns zero if
+ * there exists a device with device number dev that is currently mounted in the system, -ENOSSN otherwise.
+ * present is an output parameter, after the function returns, it's equal to true if the sector has been
+ * already registered by a previous write request, false otherwise.
+ */
 int registry_lookup_sector(dev_t dev, sector_t sector, bool *present) {
     rcu_read_lock();
     struct snapshot_metadata *it = registry_get_by(by_dev, &dev);
@@ -422,7 +419,7 @@ bool registry_has_directory(dev_t dev, char *dirname, bool *has_dir) {
 void registry_destroy_session(dev_t dev) {
     struct snapshot_metadata *new_node = node_alloc_noname(GFP_KERNEL);
     if (!new_node) {
-        pr_debug(pr_format("out of memory"));
+        pr_err("out of memory");
         return;
     }
 
@@ -465,7 +462,7 @@ int registry_session_put(dev_t dev) {
     // so we preventively allocate memory here
     struct snapshot_metadata *node = node_alloc_noname(GFP_KERNEL);
     if (!node) {
-        pr_debug(pr_format("out of memory"));
+        pr_err("out of memory");
         return -ENOMEM;
     }
 
@@ -564,7 +561,7 @@ void registry_update_dir(dev_t dev, const char *session) {
     // we cannot update the node without make another allocation
     struct snapshot_metadata *new_node = node_alloc_noname(GFP_KERNEL);
     if (!new_node) {
-        pr_debug(pr_format("out of memory"));
+        pr_err("out of memory");
         return;
     }
 
