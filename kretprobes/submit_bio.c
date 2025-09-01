@@ -111,7 +111,6 @@ int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
     if (skip_handler(bio)) {
         return 0;
     }
-    dev_t dev = bio_devno(bio);
     struct bio *dummy_bio = create_dummy_bio(bio);
     if (dummy_bio) {
         set_arg1(regs, dummy_bio);
