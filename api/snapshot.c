@@ -87,18 +87,22 @@ void snapshot_cleanup(void) {
     destroy_workqueue(queue);
 }
 
-static void write_to_file(const char *path, struct page_iter *it) {
+static void write_to_file(const char *path, struct page_iter *it, unsigned long lo, unsigned long nbytes) {    
     struct file *fp = filp_open(path, O_CREAT | O_WRONLY, 0644);
     if (IS_ERR(fp)) {
         pr_err("cannot open file: %s, got error %ld", path, PTR_ERR(fp));
         return;
     }
+    if (WARN(it->offset + lo >= nbytes, "out of bound write: lo=%ld,n=%ld", lo, nbytes)) {
+        goto out;
+    }
     void *va = page_address(it->page);
     loff_t off = 0;
-    ssize_t n = kernel_write(fp, va + it->offset, it->len, &off);
+    ssize_t n = kernel_write(fp, va + it->offset + lo, nbytes, &off);
     if (n != it->len) {
         pr_err("kernel_write failed to write whole page at %s", path);
     }
+out:
     int err = filp_close(fp, NULL);
     if (err) {
         pr_err("filp_close failed to close file at %s, got error %d", path, err);
@@ -170,18 +174,32 @@ static void save_page(struct work_struct *work) {
     if (!path) {
         goto free_session;
     }
-    unsigned long bytes = w->iter.len;
-    for (sector_t sector = w->sector; bytes > 0; sector++) {
+    sector_t end = w->sector + (w->iter.len >> 9);
+    sector_t lo_sector = w->sector;
+    unsigned long lo = 0;
+    unsigned long acc_len = 0;
+    for (sector_t sector = w->sector; sector < end; sector++) {
         bool added;
         int err = registry_add_sector(w->devno, sector, &added);
         if (err) {
             break;
         }
-        if (!added) {
-            continue;
+        if (added) {
+            acc_len += 512;
+        } else {
+            if (acc_len > 0) {
+                sprintf(path, "%s/%s/%llu", ROOT_DIR, session, lo_sector);
+                write_to_file(path, &w->iter, lo, acc_len);
+                lo += acc_len;
+                acc_len = 0;
+            }
+            lo += 512;
+            lo_sector = sector + 1;
         }
-        sprintf(path, "%s/%s/%llu", ROOT_DIR, session, sector);
-        write_to_file(path, &w->iter);
+    }
+    if (acc_len > 0) {
+        sprintf(path, "%s/%s/%llu", ROOT_DIR, session, lo_sector);
+        write_to_file(path, &w->iter, lo, acc_len);
     }
     kfree(path);
 free_session:
