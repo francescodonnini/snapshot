@@ -15,7 +15,6 @@ snapshot-objs := 	api/activate_snapshot.o \
 					kretprobes/kretprobe_handlers.o \
 					kretprobes/mount_bdev.o \
 					kretprobes/ext4_fill_super.o \
-					kretprobes/get_tree.o \
 					kretprobes/path_umount.o \
 					kretprobes/submit_bio.o \
 					kretprobes/update_session.o \

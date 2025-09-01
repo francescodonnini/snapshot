@@ -135,12 +135,7 @@ static char *create_path(const char *session, sector_t sector) {
         pr_err("out of memory");
         return NULL;
     }
-    int ret = snprintf(path, n, "%s/%s/%llu", ROOT_DIR, session, sector);
-    if (ret >= n) {
-        pr_err("failed to sprintf path of snapshot's block, function return(%d) and destination length was %lu", ret, n);
-        kfree(path);
-        return NULL;
-    }
+    snprintf(path, n, "%s/%s/%llu", ROOT_DIR, session, sector);
     return path;
 }
 
