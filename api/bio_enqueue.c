@@ -80,9 +80,6 @@ static inline int add_page(struct bio_vec *bvec, struct bio *bio, int i) {
 
 static int allocate_pages(struct bio *bio, struct bio *orig_bio) {
     int count = 0;
-    int err = 0;
-    struct bvec_iter old;
-    memcpy(&old, &orig_bio->bi_iter, sizeof(struct bvec_iter));
     struct bio_vec bvec;
 	struct bvec_iter it;
     bio_for_each_bvec(bvec, orig_bio, it) {
@@ -91,15 +88,14 @@ static int allocate_pages(struct bio *bio, struct bio *orig_bio) {
         }
         ++count;
     }
-    memcpy(&orig_bio->bi_iter, &old, sizeof(struct bvec_iter));
-    return err;
+    return 0;
 
 out:
     struct bio_private_data *p = bio->bi_private;
     for (int i = 0; i < count; ++i) {
         __free_pages(p->iter[i].page, get_order(p->iter[i].len));
     }
-    return err;
+    return -1;
 }
 
 /**

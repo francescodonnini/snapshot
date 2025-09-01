@@ -1,4 +1,6 @@
 #include "session.h"
+#include "iset.h"
+#include "itree.h"
 #include "pr_format.h"
 #include <linux/slab.h>
 #include <linux/uuid.h>
@@ -25,13 +27,15 @@ struct session *session_create(dev_t dev) {
     if (gen_uuid(s->id, UUID_STRING_LEN + 1)) {
         goto session_create_out;
     }
-    int err = hashset_create(&s->hashset);
+    int err = iset_create(s);
     if (err) {
         goto session_create_out;
     }
     s->dev = dev;
     s->has_dir = false;
     s->mntpoints = 1;
+    spin_lock_init(&s->rb_lock);
+    s->root = RB_ROOT_CACHED;
     return s;
 
 session_create_out:
@@ -40,6 +44,7 @@ session_create_out:
 }
 
 void session_destroy(struct session *s) {
-    hashset_destroy(&s->hashset);
+    iset_destroy(s);
+    itree_destroy(s);
     kfree(s);
 }

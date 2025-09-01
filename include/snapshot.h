@@ -1,7 +1,6 @@
 #ifndef AOS_SNAPSHOT_H
 #define AOS_SNAPSHOT_H
 #include "bio.h"
-#include "hashset.h"
 #include <linux/bio.h>
 #include <linux/types.h>
 

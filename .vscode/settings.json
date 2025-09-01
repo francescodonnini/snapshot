@@ -69,7 +69,11 @@
         "fs_context.h": "c",
         "loop_utils.h": "c",
         "update_session.h": "c",
-        "chrdev_ioctl.h": "c"
+        "chrdev_ioctl.h": "c",
+        "interval_tree.h": "c",
+        "itree.h": "c",
+        "rbtree.h": "c",
+        "iset.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
     "makefile.configureOnOpen": true,

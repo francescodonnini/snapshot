@@ -1,7 +1,8 @@
 #include "registry.h"
 #include "fast_hash.h"
 #include "hash.h"
-#include "hashset.h"
+#include "iset.h"
+#include "itree.h"
 #include "pr_format.h"
 #include "session.h"
 #include "snapshot.h"
@@ -350,14 +351,9 @@ release_lock:
 }
 
 /**
- * registry_add_sector adds a sector to a session associate to a device number dev. The parameter added is optional
- * and if it's not NULL, then registry_add_sector writes false to it if the sector wasn't previously registered in the
- * corresponding hashset.
+ * registry_add_range adds a range [sector, sector + len] to a session associated to a device number dev.
  */
-int registry_add_sector(dev_t dev, sector_t sector, bool *added) {
-    if (added) {
-        *added = false;
-    }
+int registry_add_range(dev_t dev, sector_t sector, unsigned long len, bool *added) {
     rcu_read_lock();
     struct snapshot_metadata *it = registry_get_by(by_dev, &dev);
     int err;
@@ -367,20 +363,36 @@ int registry_add_sector(dev_t dev, sector_t sector, bool *added) {
         goto out;
     }
     struct session *s = it->session;
-    err = hashset_add(&s->hashset, sector, added);
+    err = itree_add(s, sector, len, added);
+out:
+    rcu_read_unlock();
+    return err;
+}
+
+int registry_add_sector(dev_t dev, sector_t sector, bool *added) {
+    rcu_read_lock();
+    struct snapshot_metadata *it = registry_get_by(by_dev, &dev);
+    int err;
+    if (!it) {
+        err = -ENOSSN;
+        pr_err("no session associated to device %d:%d", MAJOR(dev), MINOR(dev));
+        goto out;
+    }
+    struct session *s = it->session;
+    err = iset_add(s, sector, added);
 out:
     rcu_read_unlock();
     return err;
 }
 
 /**
- * registry_lookup_sector checks if a certain device associated to device number dev has
+ * registry_lookup_range checks if a certain device associated to device number dev has
  * already received a write request that targeted a certain sector. It returns zero if
  * there exists a device with device number dev that is currently mounted in the system, -ENOSSN otherwise.
  * present is an output parameter, after the function returns, it's equal to true if the sector has been
  * already registered by a previous write request, false otherwise.
  */
-int registry_lookup_sector(dev_t dev, sector_t sector, bool *present) {
+int registry_lookup_range(dev_t dev, sector_t sector, unsigned long len, bool *present) {
     rcu_read_lock();
     struct snapshot_metadata *it = registry_get_by(by_dev, &dev);
     *present = false;
@@ -389,7 +401,7 @@ int registry_lookup_sector(dev_t dev, sector_t sector, bool *present) {
         err = -ENOSSN;
     } else {
         struct session *s = it->session;
-        *present = hashset_lookup(&s->hashset, sector);
+        *present = itree_subset_of(s, sector, len);
         err = 0;
     }
     rcu_read_unlock();

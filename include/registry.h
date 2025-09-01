@@ -18,9 +18,11 @@ int registry_init(void);
 
 void registry_cleanup(void);
 
+int registry_add_range(dev_t dev, sector_t sector, unsigned long len, bool *added);
+
 int registry_add_sector(dev_t dev, sector_t sector, bool *added);
 
-int registry_lookup_sector(dev_t dev, sector_t sector, bool *present);
+int registry_lookup_range(dev_t dev, sector_t sector, unsigned long len, bool *present);
 
 ssize_t registry_show_session(char *buf, size_t size);
 

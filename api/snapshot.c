@@ -1,6 +1,7 @@
 #include "snapshot.h"
 #include "bio_utils.h"
 #include "fast_hash.h"
+#include "iset.h"
 #include "pr_format.h"
 #include "registry.h"
 #include <linux/bio.h>
@@ -86,6 +87,24 @@ void snapshot_cleanup(void) {
     destroy_workqueue(queue);
 }
 
+static void write_to_file(const char *path, struct page_iter *it) {
+    struct file *fp = filp_open(path, O_CREAT | O_WRONLY, 0644);
+    if (IS_ERR(fp)) {
+        pr_err("cannot open file: %s, got error %ld", path, PTR_ERR(fp));
+        return;
+    }
+    void *va = page_address(it->page);
+    loff_t off = 0;
+    ssize_t n = kernel_write(fp, va + it->offset, it->len, &off);
+    if (n != it->len) {
+        pr_err("kernel_write failed to write whole page at %s", path);
+    }
+    int err = filp_close(fp, NULL);
+    if (err) {
+        pr_err("filp_close failed to close file at %s, got error %d", path, err);
+    }
+}
+
 static int mkdir_session(const char *session) {
     struct path parent;
     int err = kern_path(ROOT_DIR, LOOKUP_DIRECTORY, &parent);
@@ -123,34 +142,8 @@ out_unlock_put:
     return err;
 }
 
-static char *create_path(const char *session, sector_t sector) {
-    // 3 because of the the two slash '/' after ROOT_DIR and after session, plus the NUL character
-    size_t n = strlen(ROOT_DIR) + strlen(session) + MAX_NAME_LEN + 3;
-    if (n > PATH_MAX) {
-        pr_err("path too big");
-        return NULL;
-    }
-    char *path = kzalloc(n, GFP_KERNEL);
-    if (!path) {
-        pr_err("out of memory");
-        return NULL;
-    }
-    sprintf(path, "%s/%s/%llu", ROOT_DIR, session, sector);
-    return path;
-}
-
 static void save_page(struct work_struct *work) {
-    bool added;
     struct save_work *w = container_of(work, struct save_work, work);
-    int err = registry_add_sector(w->devno, w->sector, &added);
-    if (err) {
-        goto no_session;
-    }
-    if (!added) {
-        pr_debug(pr_format("sector %llu has already been registered to device %d:%d"), w->sector, MAJOR(w->devno), MINOR(w->devno));
-        goto no_session;
-    }
-    
     char *session = kzalloc(UUID_STRING_LEN + 1, GFP_KERNEL);
     if (!session) {
         pr_err("out of memory");
@@ -169,28 +162,27 @@ static void save_page(struct work_struct *work) {
         }
     }
 
-    char *path = create_path(session, w->sector);
+    size_t n = strlen(ROOT_DIR) + strlen(session) + MAX_NAME_LEN + 3;
+    if (n > PATH_MAX) {
+        goto free_session;
+    }
+    char *path = kzalloc(n, GFP_KERNEL);
     if (!path) {
         goto free_session;
     }
-    struct page_iter *it = &w->iter;
-    struct file *fp = filp_open(path, O_CREAT | O_WRONLY, 0644);
-    if (IS_ERR(fp)) {
-        pr_err("cannot open file: %s, got error %ld", path, PTR_ERR(fp));
-        goto no_file;
+    unsigned long bytes = w->iter.len;
+    for (sector_t sector = w->sector; bytes > 0; sector++) {
+        bool added;
+        int err = registry_add_sector(w->devno, sector, &added);
+        if (err) {
+            break;
+        }
+        if (!added) {
+            continue;
+        }
+        sprintf(path, "%s/%s/%llu", ROOT_DIR, session, sector);
+        write_to_file(path, &w->iter);
     }
-    void *va = page_address(it->page);
-    loff_t off = 0;
-    ssize_t n = kernel_write(fp, va + it->offset, it->len, &off);
-    if (n != it->len) {
-        pr_err("kernel_write failed to write whole page at %s", path);
-    }
-    err = filp_close(fp, NULL);
-    if (err) {
-        pr_err("filp_close failed to close file at %s, got error %d", path, err);
-    }
-
-no_file:
     kfree(path);
 free_session:
     kfree(session);
@@ -213,14 +205,29 @@ static int add_work(dev_t devno, sector_t sector, struct page_iter *it) {
     return queue_work(queue, &w->work);
 }
 
+static inline void free_all_pages(struct bio_private_data *p) {
+    for (int i = 0; i < p->iter_len; ++i) {
+        __free_pages(p->iter->page, get_order(p->iter->len));
+    }
+}
+
 /**
  * snapshot_save schedules each page or compound one of bio to the workqueue. Each page
  * will be saved to /snapshots/<session id>/<sector no>
  */
 void snapshot_save(struct bio *bio) {
+    // We completed successfully the read of the region to snapshot, so we
+    // can add the whole range to the red black tree. 
+    struct bio_private_data *p = bio->bi_private;
     dev_t dev = bio_devno(bio);
     sector_t sector = bio_sector(bio);
-    struct bio_private_data *p = bio->bi_private;
+    unsigned long len = bio_len(bio);
+    bool added;
+    int err = registry_add_range(dev, sector, len, &added);
+    if (err || !added) {
+        free_all_pages(p);
+        return;
+    }
     for (int i = 0; i < p->iter_len; ++i) {
         struct page_iter *it = &p->iter[i];
         int err = add_work(dev, sector, it);

@@ -14,6 +14,16 @@ static inline dev_t* bio_denvo_safe(struct bio *bio, dev_t *devno) {
     return devno;
 }
 
+static unsigned long bio_len(struct bio *bio) {
+    unsigned long n = 0;
+    struct bio_vec bvec;
+	struct bvec_iter it;
+    bio_for_each_bvec(bvec, bio, it) {
+        n += bvec.bv_len;
+    }
+    return n;
+}
+
 static inline sector_t bio_sector(struct bio *bio) {
     return bio->bi_iter.bi_sector;
 }

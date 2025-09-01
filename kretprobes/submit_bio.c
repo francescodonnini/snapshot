@@ -1,7 +1,6 @@
 #include "bio.h"
 #include "bio_utils.h"
 #include "bnull.h"
-#include "hashset.h"
 #include "kretprobe_handlers.h"
 #include "pr_format.h"
 #include "registry.h"
@@ -60,7 +59,7 @@ static inline bool empty_write(struct bio *bio) {
  * 2. has been already intercepted by the kretprobe. A bio request could be intercepted twice if it is attempting to write a block that has been never
  *    written before;
  * 3. is attempting to write to a block whose snapshot has been already saved in /snapshots.
- *    skip_handler always returns true in case of errors, if the hashset_* API(s) are misbeheaving, then executing the submit_bio handler could lead to catastrophic
+ *    skip_handler always returns true in case of errors, if the iset_* API(s) are misbeheaving, then executing the submit_bio handler could lead to catastrophic
  *    results.
  */
 static bool skip_handler(struct bio *bio) {
@@ -76,11 +75,10 @@ static bool skip_handler(struct bio *bio) {
         pr_err("cannot read device number from bio struct");
         return true;
     }
-    sector_t sector = bio_sector(bio);
-    int err = registry_lookup_sector(devno, sector, &present);
+    int err = registry_lookup_range(devno, bio_sector(bio), bio_len(bio), &present);
     if (err) {
         if (err != -ENOSSN) {
-            pr_err("registry_lookup_sector completed with error %d", err);
+            pr_err("registry_lookup_range completed with error %d", err);
         }
         return true;
     }
