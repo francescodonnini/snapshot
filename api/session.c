@@ -25,20 +25,24 @@ struct session *session_create(dev_t dev) {
     }
     s->id = (char*)s + sizeof(*s);
     if (gen_uuid(s->id, UUID_STRING_LEN + 1)) {
-        goto session_create_out;
+        goto out;
     }
     int err = iset_create(s);
     if (err) {
-        goto session_create_out;
+        goto out;
+    }
+    err = itree_create(s);
+    if (err) {
+        goto out2;
     }
     s->dev = dev;
     s->has_dir = false;
     s->mntpoints = 1;
-    spin_lock_init(&s->rb_lock);
-    s->root = RB_ROOT_CACHED;
     return s;
 
-session_create_out:
+out2:
+    iset_destroy(s);
+out:
     kfree(s);
     return NULL;
 }

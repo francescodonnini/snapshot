@@ -1,7 +1,11 @@
 #ifndef AOS_ITREE_H
 #define AOS_ITREE_H
 #include "session.h"
+#include <linux/rbtree.h>
+#include <linux/spinlock_types.h>
 #include <linux/types.h>
+
+int itree_create(struct session *s);
 
 void itree_destroy(struct session *s);
 
