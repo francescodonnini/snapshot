@@ -135,7 +135,7 @@ static char *create_path(const char *session, sector_t sector) {
         pr_err("out of memory");
         return NULL;
     }
-    snprintf(path, n, "%s/%s/%llu", ROOT_DIR, session, sector);
+    sprintf(path, "%s/%s/%llu", ROOT_DIR, session, sector);
     return path;
 }
 

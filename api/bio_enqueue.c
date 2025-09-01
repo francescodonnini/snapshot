@@ -36,12 +36,12 @@ void bio_deferred_work_cleanup(void) {
  * block IO layer
  */
 static void read_original_block_end_io(struct bio *bio) {
+    struct bio_private_data *p = bio->bi_private;
     if (bio->bi_status != BLK_STS_OK) {
         pr_err("bio completed with error %d", bio->bi_status);
     } else {
         snapshot_save(bio);
     }
-    struct bio_private_data *p = bio->bi_private;
     submit_bio(p->orig_bio);
     kfree(p);
     bio_put(bio);
@@ -86,8 +86,7 @@ static int allocate_pages(struct bio *bio, struct bio *orig_bio) {
     struct bio_vec bvec;
 	struct bvec_iter it;
     bio_for_each_bvec(bvec, orig_bio, it) {
-        err = add_page(&bvec, bio, count);
-        if (err != bvec.bv_len) {
+        if (add_page(&bvec, bio, count) != bvec.bv_len) {
             goto out;
         }
         ++count;
@@ -128,6 +127,7 @@ static struct bio* create_read_bio(struct bio *orig_bio) {
     read_bio->bi_end_io = read_original_block_end_io;
     read_bio->bi_private = data;
     if (allocate_pages(read_bio, orig_bio)) {
+        pr_err("cannot allocate pages for read bio");
         goto no_pages;
     }
     return read_bio;
@@ -154,14 +154,15 @@ static void process_bio(struct work_struct *work) {
 /**
  * bio_enqueue schedules a (write) bio for deferred work.
  */
-void bio_enqueue(struct bio *bio) {
+int bio_enqueue(struct bio *bio) {
     struct bio_work *w;
-    w = kzalloc(sizeof(*w), GFP_KERNEL);
+    w = kzalloc(sizeof(*w), GFP_ATOMIC);
     if (!w) {
         pr_err("out of memory");
-        return;
+        return -ENOMEM;
     }
     w->orig_bio = bio;
     INIT_WORK(&w->work, process_bio);
     queue_work(wq, &w->work);
+    return 0;
 }

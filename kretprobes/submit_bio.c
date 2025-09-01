@@ -7,6 +7,7 @@
 #include "registry.h"
 #include <linux/bio.h>
 #include <linux/types.h>
+#define BIO_MARKER ((unsigned short)(1 << 15))
 
 static inline void set_arg1(struct pt_regs *regs, struct bio *arg1) {
 #ifdef CONFIG_X86_64
@@ -25,7 +26,7 @@ static void dummy_end_io(struct bio *bio) {
 static struct bio *create_dummy_bio(struct bio *orig_bio) {
     struct block_device *bdev = bnull_get_bdev();
     // if this pointer is NULL then the module shouldn't have been mounted
-    if (WARN(!bdev, "instance of bnull block device is NULL")) {
+    if (!bdev) {
         return NULL;
     }
     struct bio *dummy = bio_alloc(bdev, 0, REQ_OP_DISCARD, GFP_ATOMIC);
@@ -34,10 +35,17 @@ static struct bio *create_dummy_bio(struct bio *orig_bio) {
         return NULL;
     }
     dummy->bi_end_io = dummy_end_io;
-    dummy->bi_iter.bi_sector = 0;
-    dummy->bi_iter.bi_size = 0;
     dummy->bi_private = orig_bio;
     return dummy;
+}
+
+static inline bool bio_is_marked(struct bio *bio) {
+    if (bio->bi_flags & BIO_MARKER) {
+        bio->bi_flags &= ~BIO_MARKER;
+        return true;
+    }
+    bio->bi_flags |= BIO_MARKER;
+    return false;
 }
 
 static inline bool empty_write(struct bio *bio) {
@@ -58,7 +66,8 @@ static inline bool empty_write(struct bio *bio) {
 static bool skip_handler(struct bio *bio) {
     if (!bio
         || !op_is_write(bio->bi_opf)
-        || empty_write(bio)) {
+        || empty_write(bio)
+        || bio_is_marked(bio)) {
         return true;
     }
     bool present;
@@ -102,6 +111,7 @@ int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
     if (skip_handler(bio)) {
         return 0;
     }
+    dev_t dev = bio_devno(bio);
     struct bio *dummy_bio = create_dummy_bio(bio);
     if (dummy_bio) {
         set_arg1(regs, dummy_bio);
