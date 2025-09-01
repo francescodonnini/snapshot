@@ -13,7 +13,6 @@ struct session {
     struct rhashtable      iset;
     struct rb_root_cached  rb_root;
     spinlock_t             rb_lock;
-
 };
 
 struct session *session_create(dev_t dev);
