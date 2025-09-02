@@ -73,7 +73,8 @@
         "interval_tree.h": "c",
         "itree.h": "c",
         "rbtree.h": "c",
-        "iset.h": "c"
+        "iset.h": "c",
+        "rbitmap32.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
     "makefile.configureOnOpen": true,

@@ -1,7 +1,7 @@
 #ifndef AOS_SESSION_H
 #define AOS_SESSION_H
+#include <linux/maple_tree.h>
 #include <linux/rhashtable-types.h>
-#include <linux/rbtree.h>
 #include <linux/spinlock.h>
 #include <linux/types.h>
 
@@ -11,8 +11,7 @@ struct session {
     bool                   has_dir;
     int                    mntpoints;
     struct rhashtable      iset;
-    struct rb_root_cached  rb_root;
-    spinlock_t             rb_lock;
+    struct maple_tree      tree;
 };
 
 struct session *session_create(dev_t dev);

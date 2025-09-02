@@ -93,13 +93,14 @@ static void write_to_file(const char *path, struct page_iter *it, unsigned long 
         pr_err("cannot open file: %s, got error %ld", path, PTR_ERR(fp));
         return;
     }
-    if (WARN(it->offset + lo >= nbytes, "out of bound write: lo=%ld,n=%ld", lo, nbytes)) {
+    if (lo + nbytes > it->offset + it->len) {
+        pr_err("write to %s failed: lo=%lu + #B=%lu > off=%u + len=%u", path, lo, nbytes, it->offset, it->len);
         goto out;
     }
     void *va = page_address(it->page);
     loff_t off = 0;
     ssize_t n = kernel_write(fp, va + it->offset + lo, nbytes, &off);
-    if (n != it->len) {
+    if (n != nbytes) {
         pr_err("kernel_write failed to write whole page at %s", path);
     }
 out:
@@ -252,6 +253,6 @@ void snapshot_save(struct bio *bio) {
         if (err == -ENOMEM) {
             __free_pages(it->page, get_order(it->len));
         }
-        sector += it->len >> 9;
+        sector += (it->len >> 9);
     }
 }
