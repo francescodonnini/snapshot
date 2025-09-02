@@ -25,6 +25,8 @@ PWD := $(CURDIR)
 
 ccflags-y += -I$(src)/include
 
+CFLAGS_api/registry_rcu.o += -DDEBUG
+
 all: 
 		make -C /lib/modules/$(shell uname -r)/build M=$(PWD)  modules 
 
