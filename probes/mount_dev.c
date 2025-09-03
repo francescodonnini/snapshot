@@ -72,6 +72,7 @@ int get_tree_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     struct fs_context *fc = *data;
     struct block_device *bdev = f_bdev(fc);
     if (!err && bdev) {
+        pr_debug(pr_format("registry_session_get(%s, %d:%d)"), fc->source, MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev));
         registry_session_get(fc->source, bdev->bd_dev);
     }
     return 0;

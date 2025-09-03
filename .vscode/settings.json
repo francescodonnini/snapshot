@@ -76,7 +76,9 @@
         "iset.h": "c",
         "rbitmap32.h": "c",
         "major.h": "c",
-        "uaccess.h": "c"
+        "uaccess.h": "c",
+        "fcntl.h": "c",
+        "error_t.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
     "makefile.configureOnOpen": true,

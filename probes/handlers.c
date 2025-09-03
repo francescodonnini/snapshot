@@ -33,7 +33,7 @@ static struct kretprobe submit_bio_kretprobe = {
     .entry_handler = submit_bio_entry_handler,
 };
 
-static struct kretprobe umount_kretprobe = {
+static struct kretprobe path_umount_kretprobe = {
     .kp.symbol_name = "path_umount",
     .entry_handler = path_umount_entry_handler,
     .handler = path_umount_handler,
@@ -45,7 +45,7 @@ static struct kretprobe *kretprobe_table[] = {
     &get_tree_bdev_kretprobe,
     &mount_bdev_kretprobe,
     &submit_bio_kretprobe,
-    &umount_kretprobe,
+    &path_umount_kretprobe,
 };
 static size_t KRETPROBES_NUM = sizeof(kretprobe_table) / sizeof(struct kretprobe*);
 
