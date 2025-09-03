@@ -37,7 +37,7 @@ struct session *session_create(dev_t dev) {
     }
     s->dev = dev;
     s->mntpoints = 0;
-    pr_debug(pr_format("session %s,%d:%d"));
+    pr_debug(pr_format("session %s,%d:%d"), s->id, MAJOR(dev), MINOR(dev));
     return s;
 
 out2:
