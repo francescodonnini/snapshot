@@ -37,7 +37,6 @@ struct session *session_create(dev_t dev) {
     }
     s->dev = dev;
     s->mntpoints = 0;
-    s->pending = true;
     return s;
 
 out2:
