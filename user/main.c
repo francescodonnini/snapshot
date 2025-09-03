@@ -79,13 +79,13 @@ static error_t parse_opt(int opt, char *arg, struct argp_state *state) {
     return 0;
 }
 
-static struct argp argp = { options, parse_opt, "Blkdev Snapshot", "" };
+static struct argp argp = { options, parse_opt, "Blkdev Snapshot", "Command line interface to interact with blkdev snapshot" };
 
 static void ls(void) {
     char line[1024];
     FILE* fp = fopen("/sys/kernel/sessions/active", "r");
     if (!fp) {
-        printf("cannot open /sys/kernel/sessions/active, got error %d", errno);
+        printf("module is not mounted\n");
         return;
     }
     while (fgets(line, 1024, fp)) {
