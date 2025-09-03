@@ -79,6 +79,8 @@ int ext4_fill_super_entry_handler(struct kretprobe_instance *kp, struct pt_regs 
 
 int ext4_fill_super_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 
+int get_tree_bdev_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
+
 int get_tree_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 
 int mount_bdev_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
@@ -88,10 +90,6 @@ int mount_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 int path_umount_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 
 int path_umount_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
-
-int singlefilefs_fill_super_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
-
-int singlefilefs_fill_super_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 
 int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 

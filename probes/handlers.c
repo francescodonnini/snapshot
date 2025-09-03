@@ -10,11 +10,15 @@
 static struct kretprobe ext4_fill_super_kretprobe = {
     .kp.symbol_name = "ext4_fill_super",
     .entry_handler = ext4_fill_super_entry_handler,
+    .handler = ext4_fill_super_handler,
+    .data_size = sizeof(dev_t),
 };
 
 static struct kretprobe get_tree_bdev_kretprobe = {
     .kp.symbol_name = "get_tree_bdev",
+    .entry_handler = get_tree_bdev_entry_handler,
     .handler = get_tree_bdev_handler,
+    .data_size = sizeof(struct fs_context*),
 };
 
 static struct kretprobe mount_bdev_kretprobe = {
@@ -37,12 +41,13 @@ static struct kretprobe umount_kretprobe = {
 };
 
 static struct kretprobe *kretprobe_table[] = {
+    &ext4_fill_super_kretprobe,
     &get_tree_bdev_kretprobe,
     &mount_bdev_kretprobe,
     &submit_bio_kretprobe,
     &umount_kretprobe,
 };
-static size_t KRETPROBES_NUM = sizeof(kretprobe_table) / sizeof(struct kretprobe *);
+static size_t KRETPROBES_NUM = sizeof(kretprobe_table) / sizeof(struct kretprobe*);
 
 static int register_all_kretprobes(void) {
     if (KRETPROBES_NUM <= 0) {

@@ -4,7 +4,7 @@
 #include "registry.h"
 #include <linux/printk.h>
 
-typedef int(*updt_ssn_t)(const char*,struct block_device*);
+typedef int(*updt_ssn_t)(const char*,dev_t);
 
 /**
  * registry_update_loop_device gets the path of the file backing the loop device and
@@ -24,7 +24,7 @@ static int registry_update_loop_device(struct block_device *bdev, updt_ssn_t upd
         err = PTR_ERR(ip); 
         goto out;
     }
-    err = updt_fn(ip, bdev);
+    err = updt_fn(ip, bdev->bd_dev);
 out:
     kfree(buf);
     return err;
@@ -33,12 +33,12 @@ out:
 static int update_session(const char *dev_name, struct block_device *bdev, updt_ssn_t updt_fn) {
     int err;
     if (is_loop_device(bdev)) {
-        err = registry_update_loop_device(bdev);
+        err = registry_update_loop_device(bdev, updt_fn);
     } else {
         err = updt_fn(dev_name, bdev->bd_dev);
     }
     if (err) {
-        pr_debug(pr_format("cannot update device major=%d,minor=%d, got error %d"), MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev), err);
+        pr_debug(pr_format("cannot update device %d:%d, got error %d"), MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev), err);
     }
     return err;
 }

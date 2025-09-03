@@ -13,11 +13,10 @@ snapshot-objs := 	api/activate_snapshot.o \
 					devices/bnull.o \
 					devices/chrdev_ioctl.o \
 					devices/chrdev.o \
-					kretprobes/kretprobe_handlers.o \
-					kretprobes/mount_dev.o \
-					kretprobes/path_umount.o \
-					kretprobes/submit_bio.o \
-					kretprobes/update_session.o \
+					probes/handlers.o \
+					probes/mount_dev.o \
+					probes/submit_bio.o \
+					probes/update_session.o \
 					main.o \
 
 PWD := $(CURDIR) 

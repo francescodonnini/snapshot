@@ -49,7 +49,7 @@ static const char* f_source(struct fs_context *fc) {
     return fc->source;
 }
 
-int get_tree_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
+int get_tree_bdev_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     struct fs_context *fc = get_arg1(struct fs_context*, regs);
     if (!f_source(fc)) {
         return -1;
@@ -72,7 +72,7 @@ int get_tree_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     struct fs_context *fc = *data;
     struct block_device *bdev = f_bdev(fc);
     if (!err && bdev) {
-        registry_session_get(fc->source, bdev);
+        registry_session_get(fc->source, bdev->bd_dev);
     }
     return 0;
 }
@@ -85,12 +85,11 @@ int mount_bdev_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs
     return 0;
 }
 
-static inline struct block_device* d_bdev(struct dentry *dentry, struct block_device *bdev) {
+static inline struct block_device* d_bdev(struct dentry *dentry) {
     if (!dentry || !dentry->d_sb || !dentry->d_sb->s_bdev) {
         return NULL;
     }
-    *bdev = dentry->d_sb->s_bdev;
-    return bdev;
+    return dentry->d_sb->s_bdev;
 }
 
 /**
@@ -106,7 +105,7 @@ int mount_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
         return 0;
     }
     char **data = (char**)kp->data;
-    struct block_device *bdev = d_bdev(dentry, bdev);
+    struct block_device *bdev = d_bdev(dentry);
     if (bdev) {
         if (singlefilefs_update_session(*data, bdev)) {
             pr_debug(pr_format("cannot create or update session of device %s"), *data);
