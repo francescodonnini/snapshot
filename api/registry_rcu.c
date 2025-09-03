@@ -332,6 +332,7 @@ static void free_node_only_rcu(struct rcu_head *head) {
  * It's called in kretprobe context.
  */
 int registry_session_get(const char *dev_name, dev_t dev) {
+    pr_debug(pr_format("registry_session_get(%s, %d:%d)"), dev_name, MAJOR(dev), MINOR(dev));
     int err = 0;
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
