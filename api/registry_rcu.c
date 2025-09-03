@@ -297,18 +297,16 @@ int registry_session_prealloc(const char *dev_name, dev_t dev) {
             free_old_session = true;
         }
     }
+    pr_debug(pr_format("session %s %d:%d #M=%d,P=%d"), session->id, MAJOR(dev), MINOR(dev), session->mntpoints, session->pending);
+    session->pending = true;
     node->session = session;
     node->dev_name = old->dev_name;
     node->dev_name_hash = old->dev_name_hash;
     memcpy(node->password, old->password, SHA256_LEN);
     list_replace_rcu(&old->list, &node->list);
     spin_unlock_irqrestore(&write_lock, flags);
-
     if (free_old_session) {
         call_rcu(&old->rcu, free_session_rcu);
-    } else {
-        kfree(session);
-        kfree(node);
     }
     return err;
 
@@ -350,6 +348,7 @@ int registry_session_get(const char *dev_name, dev_t dev) {
         } else if (!s->mntpoints && s->pending) {
             s->mntpoints = 1;
             s->pending = false;
+            pr_debug(pr_format("session %s has been created successfully for device %d:%d"), s->id, MAJOR(s->dev), MINOR(s->dev));
         } else {
             pr_debug(pr_format("trying to increment expired usage counter"));
         }
@@ -461,6 +460,9 @@ int registry_session_put(dev_t dev) {
     }
 
     s->mntpoints--;
+    if (s->pending) {
+        s->pending = false;
+    }
 unlock:
     spin_unlock_irqrestore(&write_lock, flags);
     return 0;
