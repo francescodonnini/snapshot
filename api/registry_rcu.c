@@ -15,7 +15,7 @@
 #include <linux/types.h>
 #include <linux/uuid.h>
 
-#define SHA1_HASH_LEN (20)
+#define SHA256_LEN (32)
 
 // Little auxiliary struct used by "by_name" predicate
 struct node_name {
@@ -29,7 +29,7 @@ struct snapshot_metadata {
     // speed up searches by making string comparisons only on collisions or matches
     unsigned long     dev_name_hash; 
     char             *dev_name;
-    char              password[SHA1_HASH_LEN];
+    char              password[SHA256_LEN];
     struct session   *session;
     struct rcu_head   rcu;
 };
@@ -170,7 +170,7 @@ static struct snapshot_metadata* mk_node(const char *dev_name, const char *passw
         err = -ENOMEM;
         goto no_node;
     }
-    err = hash("sha1", password, strlen(password), node->password, SHA1_HASH_LEN);
+    err = hash("sha256", password, strlen(password), node->password, SHA256_LEN);
     if (err) {
         goto no_hash;
     }
@@ -233,7 +233,7 @@ static void registry_delete_rcu(struct rcu_head *head) {
  * @return -EWRONGCRED if the password or the device name are wrong, 0 otherwise 
  */
 int registry_delete(const char *dev_name, const char *password) {
-    char *buffer = hash_alloc("SHA1", password, strlen(password));
+    char *buffer = hash_alloc("sha256", password, strlen(password));
     if (IS_ERR(buffer)) {
         return PTR_ERR(buffer);
     }
@@ -242,7 +242,7 @@ int registry_delete(const char *dev_name, const char *password) {
     spin_lock_irqsave(&write_lock, flags);
     struct snapshot_metadata *it = get_by_name(dev_name);
     int err = -EWRONGCRED;
-    if (it && !memcmp(buffer, it->password, SHA1_HASH_LEN)) {
+    if (it && !memcmp(buffer, it->password, SHA256_LEN)) {
         list_del_rcu(&it->list);
         err = 0;
     }
@@ -255,16 +255,72 @@ int registry_delete(const char *dev_name, const char *password) {
     return err;
 }
 
-static void free_node_only_rcu(struct rcu_head *head) {
-    struct snapshot_metadata *node = container_of(head, struct snapshot_metadata, rcu);
-    kfree(node);
-}
-
 static void free_session_rcu(struct rcu_head *head) {
     struct snapshot_metadata *node = container_of(head, struct snapshot_metadata, rcu);
     if (node->session) {
         session_destroy(node->session);
     }
+    kfree(node);
+}
+
+int registry_session_prealloc(const char *dev_name, dev_t dev) {
+    struct snapshot_metadata *node = node_alloc_noname(GFP_ATOMIC);
+    if (!node) {
+        pr_err("out of memory");
+        return -ENOMEM;
+    }
+    struct session *session = session_create(dev);
+    if (!session) {
+        pr_debug(pr_format("out of memory"));
+        kfree(node);
+        return -ENOMEM;
+    }
+
+    int err = 0;
+    unsigned long flags;
+    spin_lock_irqsave(&write_lock, flags);
+    struct snapshot_metadata *old = get_by_name(dev_name);
+    if (!old) {
+        pr_debug(pr_format("no device associated to device=%s,%d:%d"), dev_name, MAJOR(dev), MINOR(dev));
+        err = -EWRONGCRED;
+        goto release_lock; // no device
+    }
+    bool free_old_session = false; // if true, then the old session should be scheduled for deferred deallocation
+    struct session *s = old->session;
+    if (s) {
+        if (s->mntpoints > 0) { // current session is still active
+            pr_err("usage counter of session %s is greater than 0", s->id);
+            err = -1;
+            goto release_lock;
+        } else {
+            // the old session could be deallocated because a new device has been mounted
+            free_old_session = true;
+        }
+    }
+    node->session = session;
+    node->dev_name = old->dev_name;
+    node->dev_name_hash = old->dev_name_hash;
+    memcpy(node->password, old->password, SHA256_LEN);
+    list_replace_rcu(&old->list, &node->list);
+    spin_unlock_irqrestore(&write_lock, flags);
+
+    if (free_old_session) {
+        call_rcu(&old->rcu, free_session_rcu);
+    } else {
+        kfree(session);
+        kfree(node);
+    }
+    return err;
+
+release_lock:
+    spin_unlock_irqrestore(&write_lock, flags);
+    kfree(node);
+    session_destroy(session);
+    return err;
+}
+
+static void free_node_only_rcu(struct rcu_head *head) {
+    struct snapshot_metadata *node = container_of(head, struct snapshot_metadata, rcu);
     kfree(node);
 }
 
@@ -278,13 +334,46 @@ static void free_session_rcu(struct rcu_head *head) {
  * It's called in kretprobe context.
  */
 int registry_session_get(const char *dev_name, dev_t dev) {
-    pr_debug(pr_format("%s, %d:%d"), dev_name, MAJOR(dev), MINOR(dev));
-    struct snapshot_metadata *node = node_alloc_noname(GFP_KERNEL);
+    int err = 0;
+    unsigned long flags;
+    spin_lock_irqsave(&write_lock, flags);
+    struct snapshot_metadata *node = get_by_name(dev_name);
     if (!node) {
-        pr_debug(pr_format("out of memory"));
+        pr_debug(pr_format("no device associated to device=%s,%d:%d"), dev_name, MAJOR(dev), MINOR(dev));
+        err = -EWRONGCRED;
+        goto release_lock; // no device
+    }
+    struct session *s = node->session;
+    if (s) {
+        if (s->mntpoints > 0) { // current session is still active
+            s->mntpoints++;
+        } else if (!s->mntpoints && s->pending) {
+            s->mntpoints = 1;
+            s->pending = false;
+        } else {
+            pr_debug(pr_format("trying to increment expired usage counter"));
+        }
+    }
+release_lock:
+    spin_unlock_irqrestore(&write_lock, flags);
+    return err;
+}
+
+/**
+ * registry_session_get updates a previously registered image/device with the associated device number, if a session has been already registered,
+ * then it increments it usage counter.
+ * @param dev_name - the path of the image associated with the device
+ * @param dev      - the device number associated to the device
+ * @returns 0 on success, <0 otherwise.
+ * 
+ * It's called in kretprobe context.
+ */
+int registry_session_get_or_create(const char *dev_name, dev_t dev) {
+    struct snapshot_metadata *node = node_alloc_noname(GFP_ATOMIC);
+    if (!node) {
+        pr_err("out of memory");
         return -ENOMEM;
     }
-    // WARNING: it is possibile that this function sleeps (it uses kmalloc(GFP_KERNEL))
     struct session *session = session_create(dev);
     if (!session) {
         pr_debug(pr_format("out of memory"));
@@ -292,7 +381,6 @@ int registry_session_get(const char *dev_name, dev_t dev) {
         return -ENOMEM;
     }
     
-    bool session_present;
     int err = 0;
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
@@ -300,46 +388,41 @@ int registry_session_get(const char *dev_name, dev_t dev) {
     if (!old) {
         pr_debug(pr_format("no device associated to device=%s,%d:%d"), dev_name, MAJOR(dev), MINOR(dev));
         err = -EWRONGCRED;
-        goto release_lock;
+        goto release_lock; // no device
     }
-    bool free_session = false;
+    bool inplace_update = false; // if true, then only the usage counter has been incremented
+    bool free_old_session = false; // if true, then the old session should be scheduled for deferred deallocation
     struct session *s = old->session;
-    session_present = s != NULL;
-    if (session_present) {
-        // There are two possible scenarios:
-        // 1. s->mntpoints > 0: the current session is still active.
-        // 2. s->mntpoints = 0: the associated block device has been unmounted but it is still possible for the
-        //    device to receive bio requests.
-        if (s->mntpoints > 0) {
+    if (s) {
+        if (s->mntpoints > 0) { // current session is still active
             s->mntpoints++;
-            // we can free the old node but not the session associated with it
-            node->session = s;
-            pr_debug(pr_format("session usage counter updated: device=%s,%d,%d;uuid=%s;mntpoints=%d"),
-                     dev_name, MAJOR(dev), MINOR(dev), s->id, s->mntpoints);
+            inplace_update = true;
+            // no need to replace the old node with the new one!
         } else {
+            session->mntpoints = 1;
             // the old session could be deallocated because a new device has been mounted
             node->session = session;
-            free_session = true;
-            pr_debug(pr_format("session created successfully: device=%s,%d,%d;uuid=%s;mntpoints=%d"),
-                     dev_name, MAJOR(dev), MINOR(dev), session->id, session->mntpoints);
+            free_old_session = true;
         }
     } else {
         node->session = session;
-        pr_debug(pr_format("session created successfully: device=%s,%d,%d;uuid=%s;mntpoints=%d"),
-                 dev_name, MAJOR(dev), MINOR(dev), session->id, session->mntpoints);
     }
 
-    node->dev_name = old->dev_name;
-    node->dev_name_hash = old->dev_name_hash;
-    memcpy(node->password, old->password, SHA1_HASH_LEN);
-    
-    list_replace_rcu(&old->list, &node->list);
+    if (!inplace_update) {
+        node->dev_name = old->dev_name;
+        node->dev_name_hash = old->dev_name_hash;
+        memcpy(node->password, old->password, SHA256_LEN);
+        list_replace_rcu(&old->list, &node->list);
+    }
     spin_unlock_irqrestore(&write_lock, flags);
 
-    if (free_session) {
+    if (free_old_session) {
         call_rcu(&old->rcu, free_session_rcu);
-    } else {
+    } else if (!inplace_update) {
         call_rcu(&old->rcu, free_node_only_rcu);
+    } else {
+        kfree(session);
+        kfree(node);
     }
     return err;
 
@@ -348,6 +431,94 @@ release_lock:
     kfree(node);
     session_destroy(session);
     return err;
+}
+
+/**
+ * registry_put_session attempts to decrement the usage counter of a session associated
+ * to device number dev. Once the counter drops to zero, the corresponding session isn't free
+ * immediately but it can be replaced by a new session if an appropriate device is mounted in the system.
+ */
+int registry_session_put(dev_t dev) {
+    // it indicates that there is no need for an update so we can deallocate
+    // the memory previously allocated
+    unsigned long flags;
+    spin_lock_irqsave(&write_lock, flags);
+    int err;
+    struct snapshot_metadata *node = registry_get_by(by_dev, &dev);
+    if (!node) {
+        pr_debug(pr_format("no device associated to %d:%d"), MAJOR(dev), MINOR(dev));
+        err = -ENODEV;
+        goto unlock;
+    }
+    struct session *s = node->session;
+    if (WARN(!s, "no session associated to %d:%d", MAJOR(dev), MINOR(dev))) {
+        err = -ENOSSN;
+        goto unlock;
+    }
+    if (WARN(!s->mntpoints, "usage count for session %s is already 0", s->id)) {
+        err = -ENOSSN;
+        goto unlock;
+    }
+
+    s->mntpoints--;
+unlock:
+    spin_unlock_irqrestore(&write_lock, flags);
+    return 0;
+}
+
+bool registry_session_id(dev_t dev, char *id) {
+    rcu_read_lock();
+    bool found = false;
+    struct snapshot_metadata *it = registry_get_by(by_dev, &dev);
+    found = it != NULL;
+    if (found) {
+        struct session *s = it->session;
+        strncpy(id, s->id, UUID_STRING_LEN + 1);
+    }
+    rcu_read_unlock();
+    return found;
+}
+
+/**
+ * registry_session_destroy detaches the current session from the node associated
+ * to the device number dev. This function is used only when a function responsible to
+ * fill a super block fails, so it is safe to assume that the session is not used by other
+ * processes.
+ */
+void registry_session_destroy(dev_t dev) {
+    struct snapshot_metadata *new_node = node_alloc_noname(GFP_KERNEL);
+    if (!new_node) {
+        pr_err("out of memory");
+        return;
+    }
+
+    unsigned long flags;
+    spin_lock_irqsave(&write_lock, flags);
+    struct snapshot_metadata *it = registry_get_by(by_dev, &dev);
+    int err = 0;
+    if (!it) {
+        err = -ENOSSN;
+        goto no_session;
+    }
+    
+    new_node->dev_name = it->dev_name;
+    new_node->dev_name_hash = it->dev_name_hash;
+    memcpy(new_node->password, it->password, SHA256_LEN);
+    
+    struct session *s = it->session;
+    WARN(s->mntpoints != 1, "usage counter of session '%s' is %d, expected 1\n", s->id, s->mntpoints);
+    
+    new_node->session = NULL;
+
+    list_replace_rcu(&it->list, &new_node->list);
+
+no_session:
+    spin_unlock_irqrestore(&write_lock, flags);
+    if (err) {
+        kfree(new_node);
+    } else {
+        call_rcu(&it->rcu, free_session_rcu);
+    }
 }
 
 /**
@@ -408,118 +579,6 @@ int registry_lookup_range(dev_t dev, sector_t sector, unsigned long len, bool *p
     return err;
 }
 
-bool registry_has_directory(dev_t dev, char *dirname, bool *has_dir) {
-    rcu_read_lock();
-    bool found = false;
-    struct snapshot_metadata *it = registry_get_by(by_dev, &dev);
-    found = it != NULL;
-    if (found) {
-        struct session *s = it->session;
-        strncpy(dirname, s->id, UUID_STRING_LEN + 1);
-        *has_dir = s->has_dir;
-    }
-    rcu_read_unlock();
-    return found;
-}
-
-/**
- * registry_destroy_session detaches the current session from the node associated
- * to the device number dev. This function is used only when a function responsible to
- * fill a super block fails, so it is safe to assume that the session is not used by other
- * processes.
- */
-void registry_destroy_session(dev_t dev) {
-    struct snapshot_metadata *new_node = node_alloc_noname(GFP_KERNEL);
-    if (!new_node) {
-        pr_err("out of memory");
-        return;
-    }
-
-    unsigned long flags;
-    spin_lock_irqsave(&write_lock, flags);
-    struct snapshot_metadata *it = registry_get_by(by_dev, &dev);
-    int err = 0;
-    if (!it) {
-        err = -ENOSSN;
-        goto no_session;
-    }
-    
-    new_node->dev_name = it->dev_name;
-    new_node->dev_name_hash = it->dev_name_hash;
-    memcpy(new_node->password, it->password, SHA1_HASH_LEN);
-    
-    struct session *s = it->session;
-    WARN(s->mntpoints != 1, "usage counter of session '%s' is %d, expected 1\n", s->id, s->mntpoints);
-    
-    new_node->session = NULL;
-
-    list_replace_rcu(&it->list, &new_node->list);
-
-no_session:
-    spin_unlock_irqrestore(&write_lock, flags);
-    if (err) {
-        kfree(new_node);
-    } else {
-        call_rcu(&it->rcu, free_session_rcu);
-    }
-}
-
-/**
- * registry_put_session attempts to decrement the usage counter of a session associated
- * to device number dev. Once the counter drops to zero, the corresponding session isn't free
- * immediately but it can be replaced by a new session if an appropriate device is mounted in the system.
- */
-int registry_session_put(dev_t dev) {
-    // We cannot allocate memory inside the spinlock (if we use GFP_KERNEL)
-    // so we preventively allocate memory here
-    struct snapshot_metadata *node = node_alloc_noname(GFP_KERNEL);
-    if (!node) {
-        pr_err("out of memory");
-        return -ENOMEM;
-    }
-
-    // it indicates that there is no need for an update so we can deallocate
-    // the memory previously allocated
-    bool free_node = false;
-    unsigned long flags;
-    spin_lock_irqsave(&write_lock, flags);
-    int err;
-    struct snapshot_metadata *old = registry_get_by(by_dev, &dev);
-    if (!old) {
-        pr_debug(pr_format("no device associated to %d,%d"), MAJOR(dev), MINOR(dev));
-        free_node = true;
-        err = -ENODEV;
-        goto unlock;
-    }
-    struct session *s = old->session;
-    if (WARN(!s, "no session associated to %d,%d", MAJOR(dev), MINOR(dev))) {
-        free_node = true;
-        err = -ENOSSN;
-        goto unlock;
-    }
-    if (WARN(!s->mntpoints, "usage count for session %s is already 0", s->id)) {
-        free_node = true;
-        err = -1;
-        goto unlock;
-    }
-
-    node->dev_name = old->dev_name;
-    node->dev_name_hash = old->dev_name_hash;
-    memcpy(node->password, old->password, SHA1_HASH_LEN);
-    s->mntpoints--;
-    node->session = s;
-    list_replace_rcu(&old->list, &node->list);
-
-unlock:
-    spin_unlock_irqrestore(&write_lock, flags);
-    if (free_node) {
-        kfree(node);
-    } else {
-        call_rcu(&old->rcu, free_node_only_rcu);
-    }
-    return 0;
-}
-
 static inline ssize_t length(struct snapshot_metadata *it) {
     size_t n = strlen(it->dev_name) + 1; // + length of " "
     struct session *s = it->session;
@@ -552,7 +611,7 @@ ssize_t registry_show_session(char *buf, size_t size) {
         }
         br += sprintf(&buf[br], "%s ", it->dev_name);
         struct session *s = it->session;
-        if (s) {
+        if (s && s->mntpoints > 0) {
             br += sprintf(&buf[br], "%s\n", s->id);
         } else {
             br += sprintf(&buf[br], "-\n");
@@ -563,43 +622,4 @@ ssize_t registry_show_session(char *buf, size_t size) {
         br += sprintf(&buf[br], "EOF");
     }
     return br;
-}
-
-/**
- * registry_update_dir updates the current session associated to the device number dev writing that
- * the current active session has finally a directory where to write the blocks
- */
-void registry_update_dir(dev_t dev, const char *session) {
-    // we cannot update the node without make another allocation
-    struct snapshot_metadata *new_node = node_alloc_noname(GFP_KERNEL);
-    if (!new_node) {
-        pr_err("out of memory");
-        return;
-    }
-
-    unsigned long flags;
-    spin_lock_irqsave(&write_lock, flags);
-    struct snapshot_metadata *old_node = registry_get_by(by_dev, &dev);
-    int err = 0;
-    if (!old_node) {
-        err = -ENOSSN;
-        goto release_lock;
-    }
-
-    new_node->dev_name = old_node->dev_name;
-    new_node->dev_name_hash = old_node->dev_name_hash;
-    memcpy(new_node->password, old_node->password, SHA1_HASH_LEN);
-    struct session *s = old_node->session;
-    if (!s) {
-        pr_debug(pr_format("no session associated with device %s"), old_node->dev_name);
-        goto release_lock;
-    }
-    s->has_dir = true;
-    new_node->session = s;
-
-    list_replace_rcu(&old_node->list, &new_node->list);
-
-release_lock:
-    spin_unlock_irqrestore(&write_lock, flags);
-    call_rcu(&old_node->rcu, free_node_only_rcu);
 }

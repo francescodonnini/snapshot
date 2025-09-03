@@ -18,6 +18,22 @@ int registry_init(void);
 
 void registry_cleanup(void);
 
+int registry_insert(const char *dev_name, const char *password);
+
+int registry_delete(const char *dev_name, const char *password);
+
+int registry_session_prealloc(const char *dev_name, dev_t dev);
+
+int registry_session_get_or_create(const char *dev_name, dev_t dev);
+
+int registry_session_get(const char *dev_name, dev_t dev); 
+
+int registry_session_put(dev_t dev);
+
+void registry_session_destroy(dev_t dev);
+
+bool registry_session_id(dev_t dev, char *id);
+
 int registry_add_range(dev_t dev, sector_t sector, unsigned long len, bool *added);
 
 int registry_add_sector(dev_t dev, sector_t sector, bool *added);
@@ -25,19 +41,5 @@ int registry_add_sector(dev_t dev, sector_t sector, bool *added);
 int registry_lookup_range(dev_t dev, sector_t sector, unsigned long len, bool *present);
 
 ssize_t registry_show_session(char *buf, size_t size);
-
-bool registry_has_directory(dev_t dev, char *id, bool *has_dir);
-
-int registry_insert(const char *dev_name, const char *password);
-
-int registry_delete(const char *dev_name, const char *password);
-
-void registry_update_dir(dev_t dev, const char *session);
-
-int registry_session_get(const char *dev_name, dev_t dev); 
-
-int registry_session_put(dev_t dev);
-
-void registry_destroy_session(dev_t dev);
 
 #endif

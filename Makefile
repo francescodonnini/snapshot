@@ -14,8 +14,7 @@ snapshot-objs := 	api/activate_snapshot.o \
 					devices/chrdev_ioctl.o \
 					devices/chrdev.o \
 					kretprobes/kretprobe_handlers.o \
-					kretprobes/mount_bdev.o \
-					kretprobes/ext4_fill_super.o \
+					kretprobes/mount_dev.o \
 					kretprobes/path_umount.o \
 					kretprobes/submit_bio.o \
 					kretprobes/update_session.o \
@@ -26,6 +25,7 @@ PWD := $(CURDIR)
 ccflags-y += -I$(src)/include
 
 CFLAGS_api/registry_rcu.o += -DDEBUG
+CFLAGS_kretprobes/get_tree_bdev.o += -DDEBUG
 
 all: 
 		make -C /lib/modules/$(shell uname -r)/build M=$(PWD)  modules 

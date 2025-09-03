@@ -36,8 +36,8 @@ struct session *session_create(dev_t dev) {
         goto out2;
     }
     s->dev = dev;
-    s->has_dir = false;
-    s->mntpoints = 1;
+    s->mntpoints = 0;
+    s->pending = true;
     return s;
 
 out2:

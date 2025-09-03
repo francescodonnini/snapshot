@@ -154,17 +154,13 @@ static void save_page(struct work_struct *work) {
         pr_err("out of memory");
         goto no_session;
     }
-    bool has_dir;
-    if (!registry_has_directory(w->devno, session, &has_dir)) {
+    if (!registry_session_id(w->devno, session)) {
         pr_err("no session associated to device %d:%d", MAJOR(w->devno), MINOR(w->devno));
         goto no_session;
     }
-    if (!has_dir) {
-        if (mkdir_session(session)) {
-            goto free_session;
-        } else {
-            registry_update_dir(w->devno, session);
-        }
+    int err = mkdir_session(session);
+    if (err && err != -EEXIST) {
+        goto free_session;
     }
 
     size_t n = strlen(ROOT_DIR) + strlen(session) + MAX_NAME_LEN + 3;
@@ -236,7 +232,7 @@ static inline void free_all_pages(struct bio_private_data *p) {
  */
 void snapshot_save(struct bio *bio) {
     // We completed successfully the read of the region to snapshot, so we
-    // can add the whole range to the red black tree. 
+    // can add the whole range to the tree. 
     struct bio_private_data *p = bio->bi_private;
     dev_t dev = bio_devno(bio);
     sector_t sector = bio_sector(bio);

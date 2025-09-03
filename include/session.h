@@ -8,7 +8,7 @@
 struct session {
     dev_t                  dev;
     char                  *id;
-    bool                   has_dir;
+    bool                   pending;
     int                    mntpoints;
     struct rhashtable      iset;
     struct maple_tree      tree;

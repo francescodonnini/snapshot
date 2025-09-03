@@ -74,7 +74,8 @@
         "itree.h": "c",
         "rbtree.h": "c",
         "iset.h": "c",
-        "rbitmap32.h": "c"
+        "rbitmap32.h": "c",
+        "major.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
     "makefile.configureOnOpen": true,
