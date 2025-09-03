@@ -335,7 +335,7 @@ int registry_session_get(const char *dev_name, dev_t dev) {
     int err = 0;
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
-    struct snapshot_metadata *node = get_by_name(dev_name);
+    struct snapshot_metadata *node = registry_get_by(by_dev, &dev);
     if (!node) {
         pr_debug(pr_format("no device associated to device=%s,%d:%d"), dev_name, MAJOR(dev), MINOR(dev));
         err = -EWRONGCRED;
