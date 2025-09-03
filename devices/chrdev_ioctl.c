@@ -116,11 +116,11 @@ static long do_deactivate(struct ioctl_params *params) {
 }
 
 static long check_ioctl_cmd(unsigned int cmd) {
-    if (_IOC_TYPE(cmd) != CHRDEV_IOCTL_MAGIC) {
-        pr_err("wrong magic number, expected %d but got %d", CHRDEV_IOCTL_MAGIC, _IOC_TYPE(cmd));
+    if (_IOC_TYPE(cmd) != IOCTL_SNAPSHOT_MAGIC) {
+        pr_err("wrong magic number, expected %d but got %d", IOCTL_SNAPSHOT_MAGIC, _IOC_TYPE(cmd));
         return -EINVAL;
     }
-    if (_IOC_NR(cmd) > CHRDEV_IOCTL_ACTIVATE_MAX_NR) {
+    if (_IOC_NR(cmd) > IOCTL_SNAPSHOT_MAX_NR) {
         pr_err("number too high");
         return -EINVAL;
     }
@@ -133,12 +133,12 @@ long chrdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
         return err;
     }
     switch (cmd) {
-        case CHRDEV_IOCTL_ACTIVATE:
+        case IOCTL_ACTIVATE_SNAPSHOT:
             if (!(_IOC_DIR(cmd) & (_IOC_READ | _IOC_WRITE))) {
                 return -EINVAL;
             }
             return do_activate((struct ioctl_params*)arg);
-        case CHRDEV_IOCTL_DEACTIVATE:
+        case IOCTL_DEACTIVATE_SNAPSHOT:
             if (!(_IOC_DIR(cmd) & (_IOC_READ | _IOC_WRITE))) {
                 return -EINVAL;
             }

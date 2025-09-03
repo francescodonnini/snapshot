@@ -13,6 +13,7 @@
 #include <linux/path.h>
 #include <linux/printk.h>
 #include <linux/sprintf.h>
+#include <linux/version.h>
 #include <linux/workqueue.h>
 
 #define MAX_NAME_LEN (20)
@@ -49,7 +50,7 @@ static int mkdir_snapshots(void) {
         dput(dentry);
         goto out_unlock_put;
     }
-
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
     dentry = vfs_mkdir(mnt_idmap(parent.mnt), d_inode(d_parent), dentry, 0755);
     if (IS_ERR(dentry)) {
         err = PTR_ERR(dentry);
@@ -57,7 +58,14 @@ static int mkdir_snapshots(void) {
     } else {
         dput(dentry);
     }
-
+#else
+    err = vfs_mkdir(mnt_idmap(parent.mnt), d_inode(d_parent), dentry, 0755);
+    if (err) {
+        pr_err("vfs_mkdir failed on '%s', got error %d (%s)", ROOT_DIR, err, errtoa(err));
+    } else {
+        dput(dentry);
+    }
+#endif
 out_unlock_put:
     inode_unlock(d_inode(d_parent));
     path_put(&parent);
@@ -132,7 +140,7 @@ static int mkdir_session(const char *session) {
         dput(dentry);
         goto out_unlock_put;
     }
-
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
     dentry = vfs_mkdir(mnt_idmap(parent.mnt), d_inode(d_parent), dentry, 0755);
     if (IS_ERR(dentry)) {
         err = PTR_ERR(dentry);
@@ -140,7 +148,14 @@ static int mkdir_session(const char *session) {
     } else {
         dput(dentry);
     }
-    
+#else
+    err = vfs_mkdir(mnt_idmap(parent.mnt), d_inode(d_parent), dentry, 0755);
+    if (err) {
+        pr_err("vfs_mkdir failed on %s/%s, got error %d (%s)", ROOT_DIR, session, err, errtoa(err));
+    } else {
+        dput(dentry);
+    }
+#endif
 out_unlock_put:
     inode_unlock(d_inode(d_parent));
     path_put(&parent);

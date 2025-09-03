@@ -9,9 +9,9 @@
 #include <linux/kobject.h>
 #include <linux/uaccess.h>
 
-#define MY_CHRDEV_NAME  "blkdev_snapshot"
-#define MY_CHRDEV_CLASS "blkdev_snapshot_class"
-#define MY_CHRDEV_MNT   "blkdev_snapshot_device"
+#define MY_CHRDEV_NAME  "bsnapshot"
+#define MY_CHRDEV_CLASS "bsnapshot"
+#define MY_CHRDEV_MNT   "bsnapshot"
 
 struct chrdev {
     dev_t           dev;

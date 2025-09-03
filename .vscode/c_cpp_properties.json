@@ -24,7 +24,11 @@
                 "/usr/src/kernels/6.15.9-101.fc41.x86_64/",
                 "/usr/src/kernels/6.15.9-101.fc41.x86_64/include",
                 "/usr/src/kernels/6.15.9-101.fc41.x86_64/arch/x86/include",
-                "/usr/src/kernels/6.15.9-101.fc41.x86_64/arch/x86/include/generated"
+                "/usr/src/kernels/6.15.9-101.fc41.x86_64/arch/x86/include/generated",
+                "/usr/src/linux-headers-6.14.0-27-generic/",
+                "/usr/src/linux-headers-6.14.0-27-generic/include",
+                "/usr/src/linux-headers-6.14.0-27-generic/arch/x86/include",
+                "/usr/src/linux-headers-6.14.0-27-generic/arch/x86/include/generated"
             ],
             "compilerPath": "/usr/bin/gcc",
             "intelliSenseMode": "clang-x64"
