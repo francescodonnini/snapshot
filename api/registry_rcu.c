@@ -391,6 +391,7 @@ release_lock:
  * It's called in kretprobe context.
  */
 int registry_session_get_or_create(const char *dev_name, dev_t dev) {
+    pr_info("registry_session_get_or_create(%s, %d:%d)", dev_name, MAJOR(dev), MINOR(dev));
     struct snapshot_metadata *node = node_alloc_noname(GFP_ATOMIC);
     if (!node) {
         pr_err("out of memory");
@@ -411,41 +412,59 @@ int registry_session_get_or_create(const char *dev_name, dev_t dev) {
         pr_debug(pr_format("no device associated to device=%s,%d:%d"), dev_name, MAJOR(dev), MINOR(dev));
         err = -EWRONGCRED;
         goto release_lock; // no device
+    } else {
+        pr_debug(pr_format("found device %s,%d:%d"), dev_name, MAJOR(dev), MINOR(dev));
     }
-    bool inplace_update = false; // if true, then only the usage counter has been incremented
-    bool free_old_session = false; // if true, then the old session should be scheduled for deferred deallocation
+
+    const int INC_USAGE = 0; // session object is updated in-place
+    // new session object is going to be published to the registry, a new node needs to be swapped
+    // with the old one. If an old session object is pointed by the old node, it needs to be freed.
+    // The old node needs to be freed anyway.
+    const int SSN_REPLC = 1; // old session needs to be freed
+    const int SSN_CREAT = 2; // only the old node needs to be freed
+    int action;
     struct session *s = old->session;
     if (s) {
         if (s->mntpoints > 0) { // current session is still active
             s->mntpoints++;
-            inplace_update = true;
-            // no need to replace the old node with the new one!
+            action = INC_USAGE; // no need to replace the old node with the new one!
         } else {
-            session->mntpoints = 1;
             // the old session could be deallocated because a new device has been mounted
-            node->session = session;
-            free_old_session = true;
+            action = SSN_REPLC;
         }
     } else {
-        node->session = session;
+        action = SSN_CREAT;
     }
 
-    if (!inplace_update) {
+    if (action != INC_USAGE) {
+        session->mntpoints = 1;
+        node->session = session;
         node->dev_name = old->dev_name;
         node->dev_name_hash = old->dev_name_hash;
         memcpy(node->password, old->password, SHA256_LEN);
         list_replace_rcu(&old->list, &node->list);
     }
+
+    pr_debug(pr_format("session %s #M=%d P=%d has been updated successfully (action=%d)"), session->id, session->mntpoints, session->pending, action);
+
     spin_unlock_irqrestore(&write_lock, flags);
 
-    if (free_old_session) {
-        call_rcu(&old->rcu, free_session_rcu);
-    } else if (!inplace_update) {
-        call_rcu(&old->rcu, free_node_only_rcu);
-    } else {
-        kfree(session);
-        kfree(node);
+    switch (action) {
+        case INC_USAGE:
+            kfree(session);
+            kfree(node);
+            break;
+        case SSN_REPLC:
+            call_rcu(&old->rcu, free_session_rcu);
+            break;
+        case SSN_CREAT:
+            call_rcu(&old->rcu, free_node_only_rcu);
+            break;
+        default:
+            WARN(1, "unrecognized action %d", action);
+            break;
     }
+
     return err;
 
 release_lock:
