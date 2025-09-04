@@ -84,10 +84,22 @@ static inline bool registry_lookup_rcu(bool(*pred)(struct snapshot_metadata*, co
 }
 
 /**
- * registry_get_by looks up for a node that satisfies a certain predicate: pred. It assumes that the lock is held
- * while calling this function!
+ * registry_get_by looks up for a node that satisfies a certain predicate: pred. It must be called while the spinlock is held!
  */
 static inline struct snapshot_metadata *registry_get_by(bool (*pred)(struct snapshot_metadata*, const void*), const void *args) {
+    struct snapshot_metadata *it;
+    list_for_each_entry(it, &registry_db, list) {
+        if (pred(it, args)) {
+            return it;
+        }
+    }
+    return NULL;
+}
+
+/**
+ * registry_get_by looks up for a node that satisfies a certain predicate: pred. It must be called inside a RCU critical section!
+ */
+static inline struct snapshot_metadata *registry_get_by_rcu(bool (*pred)(struct snapshot_metadata*, const void*), const void *args) {
     struct snapshot_metadata *it;
     list_for_each_entry_rcu(it, &registry_db, list) {
         if (pred(it, args)) {
@@ -109,8 +121,7 @@ static inline bool by_dev(struct snapshot_metadata *node, const void *args) {
 }
 
 /**
- * get_by_name search a node whose device name is equal to name. It assumes it's called inside
- * a RCU critical section or a while a spinlock is held.
+ * get_by_name search a node whose device name is equal to name. It assumes it's called while a spinlock is held.
  */
 static inline struct snapshot_metadata *get_by_name(const char *name) {
     struct node_name nn = {
@@ -118,6 +129,17 @@ static inline struct snapshot_metadata *get_by_name(const char *name) {
         .name = name
     };
     return registry_get_by(by_name, &nn);
+}
+
+/**
+ * get_by_name search a node whose device name is equal to name. It assumes it's called while a spinlock is held.
+ */
+static inline struct snapshot_metadata *get_by_name_rcu(const char *name) {
+    struct node_name nn = {
+        .hash = fast_hash(name),
+        .name = name
+    };
+    return registry_get_by_rcu(by_name, &nn);
 }
 
 /**
@@ -472,7 +494,7 @@ unlock:
 bool registry_session_id(dev_t dev, char *id) {
     rcu_read_lock();
     bool found = false;
-    struct snapshot_metadata *it = registry_get_by(by_dev, &dev);
+    struct snapshot_metadata *it = registry_get_by_rcu(by_dev, &dev);
     found = it != NULL;
     if (found) {
         struct session *s = it->session;
@@ -529,7 +551,7 @@ no_session:
  */
 int registry_add_range(dev_t dev, sector_t sector, unsigned long len, bool *added) {
     rcu_read_lock();
-    struct snapshot_metadata *it = registry_get_by(by_dev, &dev);
+    struct snapshot_metadata *it = registry_get_by_rcu(by_dev, &dev);
     int err;
     if (!it) {
         err = -ENOSSN;
@@ -545,7 +567,7 @@ out:
 
 int registry_add_sector(dev_t dev, sector_t sector, bool *added) {
     rcu_read_lock();
-    struct snapshot_metadata *it = registry_get_by(by_dev, &dev);
+    struct snapshot_metadata *it = registry_get_by_rcu(by_dev, &dev);
     int err;
     if (!it) {
         err = -ENOSSN;
@@ -568,7 +590,7 @@ out:
  */
 int registry_lookup_range(dev_t dev, sector_t sector, unsigned long len, bool *present) {
     rcu_read_lock();
-    struct snapshot_metadata *it = registry_get_by(by_dev, &dev);
+    struct snapshot_metadata *it = registry_get_by_rcu(by_dev, &dev);
     *present = false;
     int err;
     if (!it) {
