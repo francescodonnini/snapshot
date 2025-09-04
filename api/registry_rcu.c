@@ -319,7 +319,6 @@ int registry_session_prealloc(const char *dev_name, dev_t dev) {
             free_old_session = true;
         }
     }
-    pr_debug(pr_format("session %s %d:%d #M=%d,P=%d"), session->id, MAJOR(dev), MINOR(dev), session->mntpoints, session->pending);
     session->pending = true;
     node->session = session;
     node->dev_name = old->dev_name;
@@ -354,7 +353,6 @@ static void free_node_only_rcu(struct rcu_head *head) {
  * It's called in kretprobe context.
  */
 int registry_session_get(const char *dev_name, dev_t dev) {
-    pr_debug(pr_format("registry_session_get(%s, %d:%d)"), dev_name, MAJOR(dev), MINOR(dev));
     int err = 0;
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
@@ -371,9 +369,8 @@ int registry_session_get(const char *dev_name, dev_t dev) {
         } else if (!s->mntpoints && s->pending) {
             s->mntpoints = 1;
             s->pending = false;
-            pr_debug(pr_format("session %s has been created successfully for device %d:%d"), s->id, MAJOR(s->dev), MINOR(s->dev));
         } else {
-            pr_debug(pr_format("trying to increment expired usage counter"));
+            pr_err("trying to increment expired usage counter");
         }
     }
 release_lock:
@@ -391,7 +388,6 @@ release_lock:
  * It's called in kretprobe context.
  */
 int registry_session_get_or_create(const char *dev_name, dev_t dev) {
-    pr_info("registry_session_get_or_create(%s, %d:%d)", dev_name, MAJOR(dev), MINOR(dev));
     struct snapshot_metadata *node = node_alloc_noname(GFP_ATOMIC);
     if (!node) {
         pr_err("out of memory");
@@ -412,8 +408,6 @@ int registry_session_get_or_create(const char *dev_name, dev_t dev) {
         pr_debug(pr_format("no device associated to device=%s,%d:%d"), dev_name, MAJOR(dev), MINOR(dev));
         err = -EWRONGCRED;
         goto release_lock; // no device
-    } else {
-        pr_debug(pr_format("found device %s,%d:%d"), dev_name, MAJOR(dev), MINOR(dev));
     }
 
     const int INC_USAGE = 0; // session object is updated in-place
@@ -444,8 +438,6 @@ int registry_session_get_or_create(const char *dev_name, dev_t dev) {
         memcpy(node->password, old->password, SHA256_LEN);
         list_replace_rcu(&old->list, &node->list);
     }
-
-    pr_debug(pr_format("session %s #M=%d P=%d has been updated successfully (action=%d)"), session->id, session->mntpoints, session->pending, action);
 
     spin_unlock_irqrestore(&write_lock, flags);
 
