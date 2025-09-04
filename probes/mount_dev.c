@@ -101,7 +101,6 @@ static inline struct block_device* d_bdev(struct dentry *dentry) {
 int mount_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     struct dentry *dentry = get_rval(struct dentry*, regs);
     if (IS_ERR(dentry)) {
-        pr_debug(pr_format("failed with error: %ld"), PTR_ERR(dentry));
         return 0;
     }
     char **data = (char**)kp->data;
