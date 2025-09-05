@@ -78,7 +78,13 @@
         "major.h": "c",
         "uaccess.h": "c",
         "fcntl.h": "c",
-        "error_t.h": "c"
+        "error_t.h": "c",
+        "bsparse32.h": "c",
+        "bitset32.h": "c",
+        "rbitmap64.h": "c",
+        "array16.h": "c",
+        "maple_tree.h": "c",
+        "moduleparam.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
     "makefile.configureOnOpen": true,

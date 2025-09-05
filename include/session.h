@@ -1,7 +1,7 @@
 #ifndef AOS_SESSION_H
 #define AOS_SESSION_H
+#include "../rbitmap/rbitmap32.h"
 #include <linux/maple_tree.h>
-#include <linux/rhashtable-types.h>
 #include <linux/spinlock.h>
 #include <linux/types.h>
 
@@ -10,7 +10,7 @@ struct session {
     char                  *id;
     bool                   pending;
     int                    mntpoints;
-    struct rhashtable      iset;
+    struct rbitmap32       iset;
     struct maple_tree      tree;
 };
 

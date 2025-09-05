@@ -6,13 +6,16 @@ snapshot-objs := 	api/activate_snapshot.o \
 					api/hash.o \
 					api/loop_utils.o \
 					api/registry_rcu.o \
-					api/iset_rcu.o \
+					api/iset_rb.o \
 					api/itree_rcu.o \
 					api/session.o \
 					api/snapshot.o \
 					devices/bnull.o \
 					devices/chrdev_ioctl.o \
 					devices/chrdev.o \
+					rbitmap/array16.o \
+					rbitmap/bitset16.o \
+					rbitmap/rbitmap32.o \
 					probes/handlers.o \
 					probes/mount_dev.o \
 					probes/submit_bio.o \
@@ -22,6 +25,7 @@ snapshot-objs := 	api/activate_snapshot.o \
 PWD := $(CURDIR) 
 
 ccflags-y += -I$(src)/include
+ccflags-y += -I$(src)/rbitmap
 
 CFLAGS_kretprobes/get_tree_bdev.o += -DDEBUG
 CFLAGS_kretprobes/mount_dev.o += -DDEBUG
