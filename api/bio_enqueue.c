@@ -18,7 +18,7 @@ struct bio_work {
 static struct workqueue_struct *wq;
 
 int bio_deferred_work_init(void) {
-    wq = alloc_ordered_workqueue("bio_wq", 0);
+    wq = alloc_ordered_workqueue("writebio-wq", 0);
     if (!wq) {
         pr_err("out of memory");
         return -ENOMEM;

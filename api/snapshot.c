@@ -78,7 +78,7 @@ out_unlock_put:
  * @returns 0 on success, <0 otherwise
  */
 int snapshot_init(void) {
-    queue = alloc_workqueue("save_files_wq", WQ_UNBOUND | WQ_MEM_RECLAIM, 0);
+    queue = alloc_workqueue("blocks-wq", WQ_UNBOUND | WQ_MEM_RECLAIM, 0);
     if (!queue) {
         pr_err("cannot create workqueue to save file(s)");
         return -ENOMEM;
