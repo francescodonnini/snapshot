@@ -4,11 +4,6 @@
 #include "registry.h"
 #include <linux/printk.h>
 
-struct sector_obj {
-    struct rhash_head linkage;
-    sector_t          key;
-};
-
 int iset_create(struct session *s) {
     int err = rbitmap32_init(&s->iset);
     if (err) {
