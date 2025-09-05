@@ -130,6 +130,7 @@ int rbitmap32_add(struct rbitmap32 *r, uint32_t x, bool *added) {
             break;
         case BITSET_CONTAINER:
             *added = bitset16_add(c->bitset, lower_16_bits(x));
+            err = 0;
             break;
         default:
             pr_err("invalid container type %d", c->c_type);

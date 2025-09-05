@@ -72,6 +72,7 @@ static inline int32_t grow_capacity(int32_t capacity) {
 static int array16_grow(struct array16 *b, int32_t min, bool copy) {
     int32_t capacity = b->capacity;
     int32_t new_capacity = clamp_t(int32_t, grow_capacity(capacity), min, MAX_ARRAY_SIZE);
+    pr_info("array grows from %d to %d", capacity, new_capacity);
     uint16_t *buffer;
     if (copy) {
         buffer = krealloc_array(b->buffer, new_capacity, sizeof(uint16_t), GFP_KERNEL);
@@ -81,7 +82,9 @@ static int array16_grow(struct array16 *b, int32_t min, bool copy) {
     if (!buffer) {
         return -ENOMEM;
     }
-    kfree(b->buffer);
+    if (!copy) {
+        kfree(b->buffer);
+    }
     b->buffer = buffer;
     b->capacity = new_capacity;
     return 0;
