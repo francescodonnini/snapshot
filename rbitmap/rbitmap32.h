@@ -4,6 +4,8 @@
 #include "bitset16.h"
 #include <linux/mutex.h>
 #include <linux/types.h>
+#define rcontainer_for_each(pos, bm)\
+        for (pos = (bm)->containers; pos < &(bm)->containers[16]; ++pos)\
 
 enum container_type {
     ARRAY_CONTAINER,

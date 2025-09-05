@@ -44,7 +44,21 @@ static int __init rbitmap32_test_start(void) {
             if (added) ++count;
         }
     }
-    pr_info("total elements added are %d", count);
+    int bytes = 0;
+    struct rcontainer *pos;
+    rcontainer_for_each(pos, &r) {
+        switch (pos->c_type) {
+            case ARRAY_CONTAINER:
+                if (pos->array != NULL)
+                    bytes += sizeof(*(pos->array)) + pos->array->size * sizeof(uint16_t);
+                break;
+            case BITSET_CONTAINER:
+                if (pos->bitset != NULL)
+                    bytes += sizeof(*(pos->bitset));
+                break;
+        }
+    }
+    pr_info("total elements added are %d (space required %d)", count, bytes);
     rbitmap32_destroy(&r);
     return 0;
 }

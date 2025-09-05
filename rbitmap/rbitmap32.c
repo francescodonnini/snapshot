@@ -4,9 +4,6 @@
 #include <linux/string.h>
 #include <linux/wordpart.h>
 
-#define rcontainer_for_each(pos, bm)\
-        for (pos = (bm)->containers; pos < &(bm)->containers[16]; ++pos)\
-
 int rbitmap32_init(struct rbitmap32 *r) {
     struct rcontainer *pos;
     rcontainer_for_each(pos, r) {

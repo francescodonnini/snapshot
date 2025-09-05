@@ -28,14 +28,7 @@ void iset_destroy(struct session *s) {
  * further details).
  */
 int iset_add(struct session *s, sector_t sector, bool *added) {
-    int err = rbitmap32_add(&s->iset, lower_32_bits(sector));
-    if (added) {
-        *added = err == 1;
-    }
-    if (err) {
-        err = err >= 0 ? 0 : err;
-    }
-    return err;
+    return rbitmap32_add(&s->iset, lower_32_bits(sector), added);
 }
 
 bool iset_lookup(struct session *s, sector_t sector) {
