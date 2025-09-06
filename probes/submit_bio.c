@@ -6,7 +6,6 @@
 #include "registry.h"
 #include <linux/bio.h>
 #include <linux/types.h>
-#define BIO_MARKER ((unsigned short)(1 << 15))
 
 static inline void set_arg1(struct pt_regs *regs, struct bio *arg1) {
 #ifdef CONFIG_X86_64
@@ -39,11 +38,11 @@ static struct bio *create_dummy_bio(struct bio *orig_bio) {
 }
 
 static inline bool bio_is_marked(struct bio *bio) {
-    if (bio->bi_flags & BIO_MARKER) {
-        bio->bi_flags &= ~BIO_MARKER;
+    if (bio_flagged(bio, 15)) {
+        bio_clear_flag(bio, 15);
         return true;
     }
-    bio->bi_flags |= BIO_MARKER;
+    bio_set_flag(bio, 15);
     return false;
 }
 
