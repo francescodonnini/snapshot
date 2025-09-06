@@ -8,11 +8,13 @@
 #include <linux/delay.h>
 #include <linux/list.h>
 #include <linux/string.h>
+#include <linux/time64.h>
 #include <linux/workqueue.h>
 
 struct bio_work {
     struct work_struct  work;
     struct bio         *orig_bio;
+    struct timespec64   arrival_time;
 };
 
 static struct workqueue_struct *wq;
@@ -40,7 +42,7 @@ static void read_original_block_end_io(struct bio *bio) {
     if (bio->bi_status != BLK_STS_OK) {
         pr_err("bio completed with error %d", bio->bi_status);
     } else {
-        snapshot_save(bio);
+        snapshot_save(bio, &p->arrival_time);
     }
     submit_bio(p->orig_bio);
     kfree(p);
@@ -71,7 +73,6 @@ static inline int add_page(struct bio_vec *bvec, struct bio *bio, int i) {
         __free_pages(page, order);
         return 0;
     }
-
     p->iter[i].len = bvec->bv_len;
     p->iter[i].offset = bvec->bv_offset;
     p->iter[i].page = page;
@@ -102,7 +103,7 @@ out:
  * create_read_bio creates a read request to the block IO layer. This request has a callback that schedules the original
  * write bio after the targeted region has been read from the block device
  */
-static struct bio* create_read_bio(struct bio *orig_bio) {
+static struct bio* create_read_bio(struct bio *orig_bio, struct timespec64 *arrival_time) {
     struct bio_private_data *data;
     size_t size = sizeof(*data) + sizeof(struct page_iter) * orig_bio->bi_vcnt;
     data = kzalloc(size, GFP_KERNEL);
@@ -112,8 +113,9 @@ static struct bio* create_read_bio(struct bio *orig_bio) {
     }
     data->orig_bio = orig_bio;
     data->iter_len = orig_bio->bi_vcnt;
-    sector_t sector = bio_sector(orig_bio);
+    sector_t sector = orig_bio->bi_iter.bi_sector;
     data->sector = sector;
+    memcpy(&data->arrival_time, arrival_time, sizeof(*arrival_time));
     struct bio *read_bio = bio_alloc(orig_bio->bi_bdev, orig_bio->bi_vcnt, REQ_OP_READ, GFP_KERNEL);
     if (!read_bio) {
         pr_err("bio_alloc failed");
@@ -138,7 +140,7 @@ no_bio:
 static void process_bio(struct work_struct *work) {
     struct bio_work *w = container_of(work, struct bio_work, work);
     struct bio *orig_bio = w->orig_bio;
-    struct bio *rb = create_read_bio(orig_bio);
+    struct bio *rb = create_read_bio(orig_bio, &w->arrival_time);
     if (!rb) {
         submit_bio(orig_bio);
     } else {
@@ -150,14 +152,15 @@ static void process_bio(struct work_struct *work) {
 /**
  * bio_enqueue schedules a (write) bio for deferred work.
  */
-int bio_enqueue(struct bio *bio) {
+int bio_enqueue(struct bwrapper *wrapper) {
     struct bio_work *w;
     w = kzalloc(sizeof(*w), GFP_ATOMIC);
     if (!w) {
         pr_err("out of memory");
         return -ENOMEM;
     }
-    w->orig_bio = bio;
+    w->orig_bio = wrapper->orig_bio;
+    memcpy(&w->arrival_time, &wrapper->arrival_time, sizeof(w->arrival_time));
     INIT_WORK(&w->work, process_bio);
     queue_work(wq, &w->work);
     return 0;

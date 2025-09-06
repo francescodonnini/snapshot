@@ -27,6 +27,7 @@ struct session *session_create(dev_t dev) {
     if (gen_uuid(s->id, UUID_STRING_LEN + 1)) {
         goto out;
     }
+    ktime_get_real_ts64(&s->created_on);
     int err = iset_create(s);
     if (err) {
         goto out;
@@ -37,7 +38,7 @@ struct session *session_create(dev_t dev) {
     }
     s->dev = dev;
     s->mntpoints = 0;
-    pr_debug(pr_format("session %s,%d:%d"), s->id, MAJOR(dev), MINOR(dev));
+    pr_debug(pr_format("session %s,%d:%d (on: %lld sec %ld nsec)"), s->id, MAJOR(dev), MINOR(dev), s->created_on.tv_sec, s->created_on.tv_nsec);
     return s;
 
 out2:

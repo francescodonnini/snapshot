@@ -5,6 +5,7 @@
 #include "pr_format.h"
 #include "registry.h"
 #include <linux/bio.h>
+#include <linux/time64.h>
 #include <linux/types.h>
 
 static inline void set_arg1(struct pt_regs *regs, struct bio *arg1) {
@@ -16,9 +17,10 @@ static inline void set_arg1(struct pt_regs *regs, struct bio *arg1) {
 } 
 
 static void dummy_end_io(struct bio *bio) {
-    struct bio *orig_bio = bio->bi_private;
-    bio_enqueue(orig_bio);
+    struct bwrapper *w = (struct bwrapper*)bio->bi_private;
+    bio_enqueue(w);
     bio_put(bio);
+    kfree(w);
 }
 
 static struct bio *create_dummy_bio(struct bio *orig_bio) {
@@ -27,13 +29,24 @@ static struct bio *create_dummy_bio(struct bio *orig_bio) {
     if (!bdev) {
         return NULL;
     }
-    struct bio *dummy = bio_alloc(bdev, 0, REQ_OP_DISCARD, GFP_ATOMIC);
-    if (!dummy) {
+
+    struct bwrapper *w;
+    w = kmalloc(sizeof(*w), GFP_ATOMIC);
+    if (!w) {
         pr_err("out of memory");
         return NULL;
     }
+    ktime_get_real_ts64(&w->arrival_time);
+    w->orig_bio = orig_bio;
+
+    struct bio *dummy = bio_alloc(bdev, 0, REQ_OP_DISCARD, GFP_ATOMIC);
+    if (!dummy) {
+        pr_err("out of memory");
+        kfree(w);
+        return NULL;
+    }
     dummy->bi_end_io = dummy_end_io;
-    dummy->bi_private = orig_bio;
+    dummy->bi_private = w;
     return dummy;
 }
 

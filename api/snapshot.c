@@ -21,6 +21,7 @@
 
 struct save_work {
     struct work_struct  work;
+    struct timespec64   arrival_time;
     dev_t               devno;
     sector_t            sector;
     struct page_iter    iter;
@@ -95,7 +96,7 @@ void snapshot_cleanup(void) {
     destroy_workqueue(queue);
 }
 
-static void write_to_file(const char *path, struct page_iter *it, unsigned long lo, unsigned long nbytes) {    
+static void file_write(const char *path, struct page_iter *it, unsigned long lo, unsigned long nbytes) {    
     struct file *fp = filp_open(path, O_CREAT | O_WRONLY, 0644);
     if (IS_ERR(fp)) {
         pr_err("cannot open file: %s, got error %ld", path, PTR_ERR(fp));
@@ -169,7 +170,7 @@ static void save_page(struct work_struct *work) {
         pr_err("out of memory");
         goto no_session;
     }
-    if (!registry_session_id(w->devno, session)) {
+    if (!registry_session_id(w->devno, session, &w->arrival_time)) {
         pr_err("no session associated to device %d:%d", MAJOR(w->devno), MINOR(w->devno));
         goto no_session;
     }
@@ -201,7 +202,7 @@ static void save_page(struct work_struct *work) {
         } else {
             if (acc_len > 0) {
                 sprintf(path, "%s/%s/%llu", ROOT_DIR, session, lo_sector);
-                write_to_file(path, &w->iter, lo, acc_len);
+                file_write(path, &w->iter, lo, acc_len);
                 lo += acc_len;
                 acc_len = 0;
             }
@@ -211,7 +212,7 @@ static void save_page(struct work_struct *work) {
     }
     if (acc_len > 0) {
         sprintf(path, "%s/%s/%llu", ROOT_DIR, session, lo_sector);
-        write_to_file(path, &w->iter, lo, acc_len);
+        file_write(path, &w->iter, lo, acc_len);
     }
     kfree(path);
 free_session:
@@ -221,7 +222,7 @@ no_session:
     kfree(w);
 }
 
-static int add_work(dev_t devno, sector_t sector, struct page_iter *it) {
+static int add_work(dev_t devno, sector_t sector, struct timespec64 *arrival_time, struct page_iter *it) {
     struct save_work *w;
     w = kzalloc(sizeof(*w), GFP_KERNEL);
     if (!w) {
@@ -229,6 +230,7 @@ static int add_work(dev_t devno, sector_t sector, struct page_iter *it) {
         return -ENOMEM;
     }
     memcpy(&w->iter, it, sizeof(*it));
+    memcpy(&w->arrival_time, arrival_time, sizeof(*arrival_time));
     w->devno = devno;
     w->sector = sector;
     INIT_WORK(&w->work, save_page);
@@ -245,12 +247,12 @@ static inline void free_all_pages(struct bio_private_data *p) {
  * snapshot_save schedules each page or compound one of bio to the workqueue. Each page
  * will be saved to /snapshots/<session id>/<sector no>
  */
-void snapshot_save(struct bio *bio) {
+void snapshot_save(struct bio *bio, struct timespec64 *arrival_time) {
     // We completed successfully the read of the region to snapshot, so we
     // can add the whole range to the tree. 
     struct bio_private_data *p = bio->bi_private;
-    dev_t dev = bio_devno(bio);
-    sector_t sector = bio_sector(bio);
+    dev_t dev = bio->bi_bdev->bd_dev;
+    sector_t sector = bio->bi_iter.bi_sector;
     unsigned long len = bio_len(bio);
     bool added;
     int err = registry_add_range(dev, sector, len, &added);
@@ -258,9 +260,9 @@ void snapshot_save(struct bio *bio) {
         free_all_pages(p);
         return;
     }
-    for (int i = 0; i < p->iter_len; ++i) {
-        struct page_iter *it = &p->iter[i];
-        int err = add_work(dev, sector, it);
+    struct page_iter *it;
+    page_iter_for_each(it, p) {
+        int err = add_work(dev, sector, arrival_time, it);
         if (err == -ENOMEM) {
             __free_pages(it->page, get_order(it->len));
         }

@@ -502,13 +502,17 @@ unlock:
     return 0;
 }
 
-bool registry_session_id(dev_t dev, char *id) {
+static inline bool timespec64_before(struct timespec64 *l, struct timespec64 *r) {
+    return timespec64_compare(l, r) < 0;
+}
+
+bool registry_session_id(dev_t dev, char *id, struct timespec64 *time) {
     rcu_read_lock();
     bool found = false;
     struct snapshot_metadata *it = registry_get_by_rcu(by_dev, &dev);
     found = it != NULL;
-    if (found) {
-        struct session *s = it->session;
+    struct session *s = it->session;
+    if (found && timespec64_before(&s->created_on, time)) {
         strncpy(id, s->id, UUID_STRING_LEN + 1);
     }
     rcu_read_unlock();
@@ -619,11 +623,21 @@ static inline ssize_t length(struct snapshot_metadata *it) {
     size_t n = strlen(it->dev_name) + 1; // + length of " "
     struct session *s = it->session;
     if (s) {
-        n += strlen(s->id) + 1; // + length of "\n"
+        n += strlen(s->id) + strlen(" yyyy-MM-dd HH:mm:ss\n");
     } else {
-        n += 2; // length of "-\n"
+        n += strlen("-\n"); // length of "-\n"
     }
     return n;
+}
+
+static int time64_fmt(char *buf, struct timespec64 *time) {
+    struct tm tm_info;
+    time64_to_tm(time->tv_sec, 0, &tm_info);
+    return sprintf(
+            buf,
+            "%04ld-%02d-%02d %02d:%02d:%02d",
+            tm_info.tm_year + 1900, tm_info.tm_mon + 1, tm_info.tm_mday,
+            tm_info.tm_hour, tm_info.tm_min, tm_info.tm_sec);
 }
 
 /**
@@ -648,7 +662,9 @@ ssize_t registry_show_session(char *buf, size_t size) {
         br += sprintf(&buf[br], "%s ", it->dev_name);
         struct session *s = it->session;
         if (s && s->mntpoints > 0) {
-            br += sprintf(&buf[br], "%s\n", s->id);
+            br += sprintf(&buf[br], "%s ", s->id);
+            br += time64_fmt(&buf[br], &s->created_on);
+            br += sprintf(&buf[br], "\n");
         } else {
             br += sprintf(&buf[br], "-\n");
         }

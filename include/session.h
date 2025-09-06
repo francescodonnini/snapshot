@@ -4,11 +4,13 @@
 #include <linux/maple_tree.h>
 #include <linux/rhashtable.h>
 #include <linux/spinlock.h>
+#include <linux/time64.h>
 #include <linux/types.h>
 
 struct session {
     dev_t                  dev;
     char                  *id;
+    struct timespec64      created_on;
     bool                   pending;
     int                    mntpoints;
     struct rhashtable      iset;
