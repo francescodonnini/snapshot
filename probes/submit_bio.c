@@ -1,10 +1,10 @@
 #include "bio.h"
-#include "bio_utils.h"
 #include "bnull.h"
 #include "kretprobe_handlers.h"
 #include "pr_format.h"
 #include "registry.h"
 #include <linux/bio.h>
+#include <linux/bvec.h>
 #include <linux/time64.h>
 #include <linux/types.h>
 
@@ -17,10 +17,9 @@ static inline void set_arg1(struct pt_regs *regs, struct bio *arg1) {
 } 
 
 static void dummy_end_io(struct bio *bio) {
-    struct bwrapper *w = (struct bwrapper*)bio->bi_private;
-    bio_enqueue(w);
+    struct bio *orig_bio = bio->bi_private;
+    write_bio_enqueue(orig_bio);
     bio_put(bio);
-    kfree(w);
 }
 
 static struct bio *create_dummy_bio(struct bio *orig_bio) {
@@ -30,23 +29,13 @@ static struct bio *create_dummy_bio(struct bio *orig_bio) {
         return NULL;
     }
 
-    struct bwrapper *w;
-    w = kmalloc(sizeof(*w), GFP_ATOMIC);
-    if (!w) {
-        pr_err("out of memory");
-        return NULL;
-    }
-    ktime_get_real_ts64(&w->arrival_time);
-    w->orig_bio = orig_bio;
-
     struct bio *dummy = bio_alloc(bdev, 0, REQ_OP_DISCARD, GFP_ATOMIC);
     if (!dummy) {
         pr_err("out of memory");
-        kfree(w);
         return NULL;
     }
     dummy->bi_end_io = dummy_end_io;
-    dummy->bi_private = w;
+    dummy->bi_private = orig_bio;
     return dummy;
 }
 
@@ -65,6 +54,16 @@ static inline bool empty_write(struct bio *bio) {
            && (bio->bi_iter.bi_size == 0 || bio->bi_vcnt == 0);
 }
 
+static unsigned long bio_size(struct bio *bio) {
+    unsigned long size = 0;
+    struct bio_vec bv;
+    struct bvec_iter it;
+    bio_for_each_bvec(bv, bio, it) {
+        size += bv.bv_len;
+    }
+    return size;
+}
+
 /**
  * skip_handler returns true if the submit_bio entry handler shouldn't execute, that is a bio:
  * 1. is null or is not a write bio;
@@ -81,13 +80,12 @@ static bool skip_handler(struct bio *bio) {
         || bio_is_marked(bio)) {
         return true;
     }
-    bool present;
-    dev_t devno;
-    if (!bio_denvo_safe(bio, &devno)) {
+    if (!bio->bi_bdev) {
         pr_err("cannot read device number from bio struct");
         return true;
     }
-    int err = registry_lookup_range(devno, bio_sector(bio), bio_len(bio), &present);
+    bool present;
+    int err = registry_lookup_range(bio->bi_bdev->bd_dev, bio->bi_iter.bi_sector, bio_size(bio), &present);
     if (err) {
         if (err != -ENOSSN) {
             pr_err("registry_lookup_range completed with error %d", err);

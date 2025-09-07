@@ -25,7 +25,7 @@ static int __init bsnapshot_init(void) {
     if (err) {
         goto bnull_failed;
     }
-    err = bio_deferred_work_init();
+    err = snapshot_init();
     if (err) {
         goto bio_dw_failed;
     }
@@ -42,7 +42,7 @@ static int __init bsnapshot_init(void) {
 probes_failed:
     snapshot_cleanup();
 snapshot_init_failed:
-    bio_deferred_work_cleanup();
+    snapshot_cleanup();
 bio_dw_failed:
     bnull_cleanup();
 bnull_failed:
@@ -58,7 +58,7 @@ static void __exit bsnapshot_exit(void) {
     chrdev_cleanup();
     registry_cleanup();
     bnull_cleanup();
-    bio_deferred_work_cleanup();
+    snapshot_cleanup();
     snapshot_cleanup();
 }
 

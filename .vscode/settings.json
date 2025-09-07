@@ -85,7 +85,9 @@
         "array16.h": "c",
         "maple_tree.h": "c",
         "moduleparam.h": "c",
-        "time64.h": "c"
+        "time64.h": "c",
+        "rwsem.h": "c",
+        "version.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
     "makefile.configureOnOpen": true,

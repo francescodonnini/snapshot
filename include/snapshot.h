@@ -9,6 +9,6 @@ int snapshot_init(void);
 
 void snapshot_cleanup(void);
 
-void snapshot_save(struct bio *bio, struct timespec64 *arrival_time);
+int write_bio_enqueue(struct bio *bio);
 
 #endif

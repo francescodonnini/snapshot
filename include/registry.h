@@ -32,7 +32,7 @@ int registry_session_put(dev_t dev);
 
 void registry_session_destroy(dev_t dev);
 
-bool registry_session_id(dev_t dev, char *id, struct timespec64 *time);
+bool registry_session_id(dev_t dev, char *id);
 
 int registry_add_range(dev_t dev, sector_t sector, unsigned long len, bool *added);
 
