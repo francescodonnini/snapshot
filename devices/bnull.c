@@ -50,7 +50,7 @@ static int alloc_tag_set(struct bnull_dev *blk_dev) {
     tag_set_init(blk_dev);
     int err = blk_mq_alloc_tag_set(&blk_dev->tag_set);
     if (err) {
-        pr_debug(pr_format("cannot allocate tag set for '%s'\n"), DEV_NAME);
+        pr_err("cannot allocate tag set for '%s'\n", DEV_NAME);
     }
     return err;
 }
@@ -67,7 +67,7 @@ static int gendisk_create(struct bnull_dev *blk_dev) {
     struct gendisk *gd = blk_mq_alloc_disk(&blk_dev->tag_set, NULL, NULL);
     if (IS_ERR(gd)) {
         err = PTR_ERR(gd);
-        pr_debug(pr_format("failed to allocate gendisk for '%s', got error %d\n"), DEV_NAME, err);
+        pr_err("failed to allocate gendisk for '%s', got error %d", DEV_NAME, err);
         goto free_tag_set;
     }
     snprintf(gd->disk_name, 32, "%s", DEV_NAME);
@@ -82,7 +82,7 @@ static int gendisk_create(struct bnull_dev *blk_dev) {
     blk_dev->gd = gd;
     err = add_disk(blk_dev->gd);
     if (err) {
-        pr_debug(pr_format("failed to add gendisk for '%s', got error %d\n"), DEV_NAME, err);
+        pr_err("failed to add gendisk for '%s', got error %d", DEV_NAME, err);
         goto add_disk_failed;
     }
     return 0;
@@ -106,7 +106,7 @@ static struct block_device* bdev_get_by_dev(dev_t dev) {
     blk_mode_t mode = BLK_OPEN_WRITE;
     struct file *fp = bdev_file_open_by_dev(dev, mode, NULL, NULL);
     if (IS_ERR(fp)) {
-        pr_debug(pr_format("failed to open block device '%s'\n"), DEV_NAME);
+        pr_err("failed to open block device '%s'", DEV_NAME);
         return ERR_CAST(fp);
     }
     struct block_device *blk_dev = file_bdev(fp);
@@ -117,7 +117,7 @@ static struct block_device* bdev_get_by_dev(dev_t dev) {
 int bnull_init(void) {
     int major = register_blkdev(0, DEV_NAME);
     if (major < 0) {
-        pr_debug(pr_format("failed to register block device '%s': %d\n"), DEV_NAME, major);
+        pr_err("failed to register block device '%s': %d", DEV_NAME, major);
         return major;
     }
     dev.major = major;
@@ -128,7 +128,7 @@ int bnull_init(void) {
     struct block_device *bdev = bdev_get_by_dev(MKDEV(major, 0));
     if (IS_ERR(bdev) || !bdev) {
         err = PTR_ERR(bdev);
-        pr_debug(pr_format("failed to get block device '%s', got error %d\n"), DEV_NAME, err);
+        pr_err("failed to get block device '%s', got error %d", DEV_NAME, err);
         goto delete_disk;
     }
     dev.bdev = bdev;

@@ -49,7 +49,7 @@ static int mkdir_snapshots(void) {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
     struct dentry *dentry = lookup_one(mnt_idmap(parent.mnt), &QSTR("snapshots"), d_parent);
 #else
-    struct dentry *dentry = lookup_one_len("snapshots", d_parent, strlen(session));
+    struct dentry *dentry = lookup_one_len("snapshots", d_parent, strlen("snapshots"));
 #endif
     if (IS_ERR(dentry)) {
         err = PTR_ERR(dentry);
@@ -117,12 +117,18 @@ out2:
 }
 
 void snapshot_cleanup(void) {
-    flush_workqueue(write_bio_wq);
-    flush_workqueue(save_files_wq);
-    flush_workqueue(save_blocks_wq);
-    destroy_workqueue(write_bio_wq);
-    destroy_workqueue(save_files_wq);
-    destroy_workqueue(save_blocks_wq);
+    if (write_bio_wq) {
+        flush_workqueue(write_bio_wq);
+        destroy_workqueue(write_bio_wq);
+    }
+    if (save_files_wq) {
+        flush_workqueue(save_files_wq);
+        destroy_workqueue(save_files_wq);
+    }
+    if (save_blocks_wq) {
+        flush_workqueue(save_blocks_wq);
+        destroy_workqueue(save_blocks_wq);
+    }
 }
 
 static void file_write(const char *path, struct page_iter *it, unsigned long lo, unsigned long nbytes) {    
@@ -228,7 +234,8 @@ static void save_page(struct work_struct *work) {
         bool added;
         int err = registry_add_sector(w->dev, sector, &added);
         if (err) {
-            break;
+            pr_err("cannot add sector %llu to device %d:%d", sector, MAJOR(w->dev), MINOR(w->dev));
+            continue;
         }
         if (added) {
             acc_len += 512;
@@ -325,13 +332,13 @@ static void read_bio_enqueue(struct bio_private_data *p) {
  * block IO layer
  */
 static void read_original_block_end_io(struct bio *bio) {
-    struct bio_private_data *p = (struct bio_private_data*)bio->bi_private;
-    struct bio *orig_bio = p->orig_bio;
+    struct bio_private_data *p_data = (struct bio_private_data*)bio->bi_private;
+    struct bio *orig_bio = p_data->orig_bio;
     if (bio->bi_status != BLK_STS_OK) {
         pr_err("bio completed with error %d", bio->bi_status);
-        bio_private_data_destroy(p);
+        bio_private_data_destroy(p_data);
     } else {
-        read_bio_enqueue(p);
+        read_bio_enqueue(p_data);
     }
     submit_bio(orig_bio);
     bio_put(bio);
@@ -403,8 +410,8 @@ static struct bio* create_read_bio(struct bio *orig_bio) {
         pr_err("bio_alloc failed");
         goto no_bio;
     }
-    read_bio->bi_iter.bi_sector = sector;
     read_bio->bi_end_io = read_original_block_end_io;
+    read_bio->bi_iter.bi_sector = sector;
     read_bio->bi_private = p_data;
     if (allocate_pages(read_bio, orig_bio)) {
         pr_err("cannot allocate pages for read bio");
@@ -425,11 +432,11 @@ no_bio:
 static void process_bio(struct work_struct *work) {
     struct write_bio_work *w = container_of(work, struct write_bio_work, work);
     struct bio *orig_bio = w->orig_bio;
-    struct bio *rb = create_read_bio(orig_bio);
-    if (!rb) {
-        submit_bio(orig_bio);
+    struct bio *read_bio = create_read_bio(orig_bio);
+    if (read_bio) {
+        submit_bio(read_bio);
     } else {
-        submit_bio(rb);
+        submit_bio(orig_bio);
     }
     kfree(w);
 }
