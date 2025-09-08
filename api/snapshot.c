@@ -111,11 +111,12 @@ int snapshot_init(void) {
         goto out;
     }
     save_blocks_wq = alloc_workqueue("save-blocks-wq", WQ_UNBOUND | WQ_MEM_RECLAIM, 0);
-    if (!save_files_wq) {
+    if (!save_blocks_wq) {
         pr_err("out of memory");
         err = -ENOMEM;
         goto out2;
     }
+    return 0;
 
 out2:
     destroy_workqueue(save_files_wq);
