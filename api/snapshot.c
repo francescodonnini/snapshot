@@ -25,8 +25,8 @@ struct file_work {
     struct bio_private_data *p_data;
 };
 
-static struct workqueue_struct *write_bio_wq;
-static struct workqueue_struct *save_files_wq;
+struct workqueue_struct *write_bio_wq;
+struct workqueue_struct *save_files_wq;
 
 static int mkdir_snapshots(void) {
     struct path parent;
@@ -97,11 +97,9 @@ int snapshot_init(void) {
 
 void snapshot_cleanup(void) {
     if (write_bio_wq) {
-        flush_workqueue(write_bio_wq);
         destroy_workqueue(write_bio_wq);
     }
     if (save_files_wq) {
-        flush_workqueue(save_files_wq);
         destroy_workqueue(save_files_wq);
     }
 }
@@ -181,11 +179,11 @@ static void save_page(dev_t dev, sector_t sector, struct page_iter *iter) {
     char *session = kzalloc(UUID_STRING_LEN + 1, GFP_KERNEL);
     if (!session) {
         pr_err("out of memory");
-        goto no_session;
+        return;
     }
     if (!registry_session_id(dev, session)) {
         pr_err("no session associated to device %d:%d", MAJOR(dev), MINOR(dev));
-        goto no_session;
+        return;
     }
     int err = mkdir_session(session);
     if (err && err != -EEXIST) {
@@ -204,11 +202,11 @@ static void save_page(dev_t dev, sector_t sector, struct page_iter *iter) {
     sector_t lo_sector = sector;
     unsigned long lo = 0;
     unsigned long acc_len = 0;
-    for (sector_t sector = sector; sector < end; sector++) {
+    for (sector_t s = sector; s < end; s++) {
         bool added;
-        int err = registry_add_sector(dev, sector, &added);
+        int err = registry_add_sector(dev, s, &added);
         if (err) {
-            pr_err("cannot add sector %llu to device %d:%d", sector, MAJOR(dev), MINOR(dev));
+            pr_err("cannot add sector %llu to device %d:%d", s, MAJOR(dev), MINOR(dev));
             continue;
         }
         if (added) {
@@ -221,7 +219,7 @@ static void save_page(dev_t dev, sector_t sector, struct page_iter *iter) {
                 acc_len = 0;
             }
             lo += 512;
-            lo_sector = sector + 1;
+            lo_sector = s + 1;
         }
     }
     if (acc_len > 0) {
@@ -231,8 +229,6 @@ static void save_page(dev_t dev, sector_t sector, struct page_iter *iter) {
     kfree(path);
 free_session:
     kfree(session);
-no_session:
-    __free_pages(iter->page, get_order(iter->len));
 }
 
 static inline void free_all_pages(struct bio_private_data *p_data) {
@@ -259,8 +255,7 @@ static void snapshot_save(struct work_struct *work) {
     bool added;
     int err = registry_add_range(p_data->dev, p_data->sector, p_data->bytes, &added);
     if (err || !added) {
-        bio_private_data_destroy(p_data);
-        return;
+        goto out;
     }
     sector_t sector = p_data->sector;
     struct page_iter *pos;
@@ -268,7 +263,8 @@ static void snapshot_save(struct work_struct *work) {
         save_page(p_data->dev, sector, pos);
         sector += (pos->len >> 9);
     }
-    kfree(p_data);
+out:
+    bio_private_data_destroy(p_data);
     kfree(w);
 }
 
