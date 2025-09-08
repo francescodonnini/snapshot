@@ -5,9 +5,9 @@ snapshot-objs := 	api/activate_snapshot.o \
 					api/hash.o \
 					api/loop_utils.o \
 					api/registry_rcu.o \
-					api/iset_rcu.o \
 					api/itree_rcu.o \
 					api/session.o \
+					api/snap_map.o \
 					api/snapshot.o \
 					devices/bnull.o \
 					devices/chrdev_ioctl.o \

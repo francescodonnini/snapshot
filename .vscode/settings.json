@@ -87,7 +87,9 @@
         "moduleparam.h": "c",
         "time64.h": "c",
         "rwsem.h": "c",
-        "version.h": "c"
+        "version.h": "c",
+        "srcu.h": "c",
+        "snap_map.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
     "makefile.configureOnOpen": true,

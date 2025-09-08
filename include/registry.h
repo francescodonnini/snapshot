@@ -1,6 +1,8 @@
 #ifndef AOS_REGISTRY_H
 #define AOS_REGISTRY_H
+#include "b_range.h"
 #include "session.h"
+#include <linux/time64.h>
 #include <linux/types.h>
 
 // EDUPNAME    indicates that someone has tried to register a device already registered
@@ -12,7 +14,6 @@
 #define ETOOBIG    5001
 #define EWRONGCRED 5002
 #define ENOUUID    5003
-#define ENOSSN     5004
 
 int registry_init(void);
 
@@ -34,9 +35,9 @@ void registry_session_destroy(dev_t dev);
 
 bool registry_session_id(dev_t dev, char *id);
 
-int registry_add_range(dev_t dev, sector_t sector, unsigned long len, bool *added);
+bool registry_session_id2(dev_t dev, struct timespec64 *time, char *id, struct timespec64 *created_on);
 
-int registry_add_sector(dev_t dev, sector_t sector, bool *added);
+int registry_add_range(dev_t dev, struct b_range *range, bool *added);
 
 int registry_lookup_range(dev_t dev, sector_t sector, unsigned long len, bool *present);
 

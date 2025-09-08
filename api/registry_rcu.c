@@ -1,7 +1,6 @@
 #include "registry.h"
 #include "fast_hash.h"
 #include "hash.h"
-#include "iset.h"
 #include "itree.h"
 #include "pr_format.h"
 #include "session.h"
@@ -12,10 +11,14 @@
 #include <linux/rculist.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
-#include <linux/types.h>
 #include <linux/uuid.h>
 
 #define SHA256_LEN (32)
+
+struct node_dev {
+    struct timespec64 *time;
+    dev_t              dev;
+};
 
 // Little auxiliary struct used by "by_name" predicate
 struct node_name {
@@ -34,8 +37,9 @@ struct snapshot_metadata {
     struct rcu_head   rcu;
 };
 
-DEFINE_SPINLOCK(write_lock);
+LIST_HEAD(empty_list);
 LIST_HEAD(registry_db);
+DEFINE_SPINLOCK(write_lock);
 
 /**
  * registry_init initializes all necessary data structures to manage snapshots credentials
@@ -49,14 +53,13 @@ int registry_init(void) {
  * registry_cleanup deallocates all the heap-allocated data structures used by this subsystem
  */
 void registry_cleanup(void) {
-    LIST_HEAD(old_head);
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
-    list_splice_init(&registry_db, &old_head);
+    list_splice_init(&registry_db, &empty_list);
     spin_unlock_irqrestore(&write_lock, flags);
     synchronize_rcu();
     struct snapshot_metadata *it, *tmp;
-    list_for_each_entry_safe(it, tmp, &old_head, list) {
+    list_for_each_entry_safe(it, tmp, &empty_list, list) {
         struct session *s = it->session;
         if (s) {
             session_destroy(s);
@@ -509,7 +512,38 @@ bool registry_session_id(dev_t dev, char *id) {
     found = it != NULL;
     struct session *s = it->session;
     if (found) {
-        strncpy(id, s->id, UUID_STRING_LEN + 1);
+        strncpy(id, s->id, get_session_id_len() + 1);
+    }
+    rcu_read_unlock();
+    return found;
+}
+
+static inline bool by_dev2(struct snapshot_metadata *node, const void *args) {
+    struct node_dev *nd = (struct node_dev*)args;
+    struct session *s = node->session;
+    if (!s) {
+        return false;
+    }
+    return s->dev == nd->dev && timespec64_compare(&s->created_on, nd->time) < 0;
+}
+
+static inline struct snapshot_metadata *get_by_dev2_rcu(struct timespec64 *time, dev_t dev) {
+    struct node_dev nd = {
+        .dev = dev,
+        .time = time,
+    };
+    return registry_get_by_rcu(by_dev2, &nd);
+}
+
+bool registry_session_id2(dev_t dev, struct timespec64 *time, char *id, struct timespec64 *created_on) {
+    rcu_read_lock();
+    bool found = false;
+    struct snapshot_metadata *it = get_by_dev2_rcu(time, dev);
+    found = it != NULL;
+    struct session *s = it->session;
+    if (found) {
+        strncpy(id, s->id, get_session_id_len() + 1);
+        memcpy(time, &s->created_on, sizeof(*time));
     }
     rcu_read_unlock();
     return found;
@@ -560,7 +594,7 @@ no_session:
 /**
  * registry_add_range adds a range [sector, sector + len] to a session associated to a device number dev.
  */
-int registry_add_range(dev_t dev, sector_t sector, unsigned long len, bool *added) {
+int registry_add_range(dev_t dev, struct b_range *range, bool *added) {
     rcu_read_lock();
     struct snapshot_metadata *it = registry_get_by_rcu(by_dev, &dev);
     int err;
@@ -570,23 +604,7 @@ int registry_add_range(dev_t dev, sector_t sector, unsigned long len, bool *adde
         goto out;
     }
     struct session *s = it->session;
-    err = itree_add(s, sector, len, added);
-out:
-    rcu_read_unlock();
-    return err;
-}
-
-int registry_add_sector(dev_t dev, sector_t sector, bool *added) {
-    rcu_read_lock();
-    struct snapshot_metadata *it = registry_get_by_rcu(by_dev, &dev);
-    int err;
-    if (!it) {
-        err = -ENOSSN;
-        pr_err("no session associated to device %d:%d", MAJOR(dev), MINOR(dev));
-        goto out;
-    }
-    struct session *s = it->session;
-    err = iset_add(s, sector, added);
+    err = itree_add(s, range, added);
 out:
     rcu_read_unlock();
     return err;

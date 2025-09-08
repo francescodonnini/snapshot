@@ -54,14 +54,8 @@ static inline bool empty_write(struct bio *bio) {
            && (bio->bi_iter.bi_size == 0 || bio->bi_vcnt == 0);
 }
 
-static unsigned long bio_size(struct bio *bio) {
-    unsigned long size = 0;
-    struct bio_vec bv;
-    struct bvec_iter it;
-    bio_for_each_bvec(bv, bio, it) {
-        size += bv.bv_len;
-    }
-    return size;
+static inline unsigned long bio_size(struct bio *bio) {
+    return bio->bi_iter.bi_size;
 }
 
 /**

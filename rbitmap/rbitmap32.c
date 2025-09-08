@@ -110,6 +110,11 @@ static struct rcontainer* rcontainer_nth(struct rbitmap32 *r, uint32_t x) {
     return &r->containers[container_index(x)];
 }
 
+/**
+ * rbitmap32_add adds an integer x to the bitmap. It returns 0 on success, <0 otherwise. It
+ * sets added to true if the x wasn't already in the set, false otherwise. added is ignored
+ * if the insertion fails.
+ */
 int rbitmap32_add(struct rbitmap32 *r, uint32_t x, bool *added) {
     struct rcontainer *c = rcontainer_nth(r, x);
     mutex_lock(&c->lock);

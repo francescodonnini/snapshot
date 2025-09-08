@@ -1,6 +1,8 @@
 #include "bio.h"
+#include "itree.h"
 #include "pr_format.h"
 #include "registry.h"
+#include "snap_map.h"
 #include "snapshot.h"
 #include <linux/bio.h>
 #include <linux/bvec.h>
@@ -22,11 +24,23 @@ struct write_bio_work {
 
 struct file_work {
     struct work_struct       work;
+    struct bio              *orig_bio;
     struct bio_private_data *p_data;
+    struct timespec64        read_completed_on;
+};
+
+struct block_work {
+    struct work_struct work;
+    dev_t              device;
+    sector_t           sector;
+    struct page_iter   data;
+    struct timespec64  session_created_on;
+    char               session_id[];
 };
 
 struct workqueue_struct *write_bio_wq;
 struct workqueue_struct *save_files_wq;
+struct workqueue_struct *save_blocks_wq;
 
 static int mkdir_snapshots(void) {
     struct path parent;
@@ -77,11 +91,15 @@ out_unlock_put:
 }
 
 int snapshot_init(void) {
-    int err = mkdir_snapshots();
+    int err = snap_map_init();
     if (err) {
         return err;
     }
-    write_bio_wq = alloc_ordered_workqueue("writebio-wq", 0);
+    err = mkdir_snapshots();
+    if (err) {
+        return err;
+    }
+    write_bio_wq = alloc_ordered_workqueue("write-bio-wq", 0);
     if (!write_bio_wq) {
         pr_err("out of memory");
         return -ENOMEM;
@@ -89,10 +107,21 @@ int snapshot_init(void) {
     save_files_wq = alloc_workqueue("save-files-wq", WQ_UNBOUND | WQ_MEM_RECLAIM, 0);
     if (!save_files_wq) {
         pr_err("out of memory");
-        destroy_workqueue(write_bio_wq);
-        return -ENOMEM;
+        err = -ENOMEM;
+        goto out;
     }
-    return 0;
+    save_blocks_wq = alloc_workqueue("save-blocks-wq", WQ_UNBOUND | WQ_MEM_RECLAIM, 0);
+    if (!save_files_wq) {
+        pr_err("out of memory");
+        err = -ENOMEM;
+        goto out2;
+    }
+
+out2:
+    destroy_workqueue(save_files_wq);
+out:
+    destroy_workqueue(write_bio_wq);
+    return err;
 }
 
 void snapshot_cleanup(void) {
@@ -102,6 +131,10 @@ void snapshot_cleanup(void) {
     if (save_files_wq) {
         destroy_workqueue(save_files_wq);
     }
+    if (save_blocks_wq) {
+        destroy_workqueue(save_blocks_wq);
+    }
+    snap_map_cleanup();
 }
 
 static void file_write(const char *path, struct page_iter *it, unsigned long lo, unsigned long nbytes) {    
@@ -175,45 +208,33 @@ out_unlock_put:
     return err;
 }
 
-static void save_page(dev_t dev, sector_t sector, struct page_iter *iter) {
-    char *session = kzalloc(UUID_STRING_LEN + 1, GFP_KERNEL);
-    if (!session) {
-        pr_err("out of memory");
-        return;
-    }
-    if (!registry_session_id(dev, session)) {
-        pr_err("no session associated to device %d:%d", MAJOR(dev), MINOR(dev));
-        return;
-    }
-    int err = mkdir_session(session);
-    if (err && err != -EEXIST) {
-        goto free_session;
-    }
-
-    size_t n = strlen(ROOT_DIR) + strlen(session) + MAX_NAME_LEN + 3;
+static void save_block(struct work_struct *work) {
+    struct block_work *w = container_of(work, struct block_work, work);
+    size_t n = strlen(ROOT_DIR) + strlen(w->session_id) + MAX_NAME_LEN + 3;
     if (n > PATH_MAX) {
-        goto free_session;
+        goto out;
     }
     char *path = kzalloc(n, GFP_KERNEL);
     if (!path) {
-        goto free_session;
+        goto out;
     }
-    sector_t end = sector + (iter->len >> 9);
-    sector_t lo_sector = sector;
+    struct page_iter *iter = &w->data;
+    sector_t end = w->sector + (iter->len >> 9);
+    sector_t lo_sector = w->sector;
     unsigned long lo = 0;
     unsigned long acc_len = 0;
-    for (sector_t s = sector; s < end; s++) {
+    for (sector_t s = w->sector; s < end; s++) {
         bool added;
-        int err = registry_add_sector(dev, s, &added);
+        int err = snap_map_add_sector(w->device, &w->session_created_on, s, &added);
         if (err) {
-            pr_err("cannot add sector %llu to device %d:%d", s, MAJOR(dev), MINOR(dev));
+            pr_err("cannot add sector %llu to device %d:%d", s, MAJOR(w->device), MINOR(w->device));
             continue;
         }
         if (added) {
             acc_len += 512;
         } else {
             if (acc_len > 0) {
-                sprintf(path, "%s/%s/%llu", ROOT_DIR, session, lo_sector);
+                sprintf(path, "%s/%s/%llu", ROOT_DIR, w->session_id, lo_sector);
                 file_write(path, iter, lo, acc_len);
                 lo += acc_len;
                 acc_len = 0;
@@ -223,12 +244,33 @@ static void save_page(dev_t dev, sector_t sector, struct page_iter *iter) {
         }
     }
     if (acc_len > 0) {
-        sprintf(path, "%s/%s/%llu", ROOT_DIR, session, lo_sector);
+        sprintf(path, "%s/%s/%llu", ROOT_DIR, w->session_id, lo_sector);
         file_write(path, iter, lo, acc_len);
     }
     kfree(path);
-free_session:
-    kfree(session);
+out:
+    kfree(w);
+}
+
+static void add_work(
+    const char *session,
+    struct timespec64 *created_on,
+    dev_t dev,
+    sector_t sector,
+    struct page_iter *p_iter) {
+    struct block_work *w;
+    w = kzalloc(sizeof(*w) + get_session_id_len() + 1, GFP_KERNEL);
+    if (!w) {
+        pr_err("out of memory");
+        return;
+    }
+    w->device = dev;
+    w->sector = sector;
+    memcpy(w->session_id, session, get_session_id_len());
+    memcpy(&w->data, p_iter, sizeof(struct page_iter));
+    memcpy(&w->session_created_on, created_on, sizeof(struct timespec64));
+    INIT_WORK(&w->work, save_block);
+    queue_work(save_blocks_wq, &w->work);
 }
 
 static inline void free_all_pages(struct bio_private_data *p_data) {
@@ -249,33 +291,71 @@ static void bio_private_data_destroy(struct bio_private_data *p_data) {
  */
 static void snapshot_save(struct work_struct *work) {
     struct file_work *w = container_of(work, struct file_work, work);
-    // We completed successfully the read of the region to snapshot, so we
-    // can add the whole range to the tree.
-    struct bio_private_data *p_data = w->p_data;
-    bool added;
-    int err = registry_add_range(p_data->dev, p_data->sector, p_data->bytes, &added);
-    if (err || !added) {
+    submit_bio(w->orig_bio);
+    if (!w->p_data) {
+        return;
+    }
+    char *session = kzalloc(get_session_id_len() + 1, GFP_KERNEL);
+    if (!session) {
+        pr_err("out of memory");
         goto out;
     }
+    struct bio_private_data *p_data = w->p_data;
+    struct timespec64 session_created_on;
+    int err = registry_session_id2(p_data->dev, &w->read_completed_on, session, &session_created_on);
+    if (err) {
+        pr_err("no session associated to device %d:%d", MAJOR(p_data->dev), MINOR(p_data->dev));
+        goto free_session;
+    }
+
+    // We completed successfully the read of the region to snapshot, so we
+    // can add the whole range to the tree.
+    struct b_range *range = b_range_alloc(p_data->sector, p_data->bytes);
+    if (!range) {
+        pr_err("out of memory");
+        goto free_session;
+    }
+    bool added;
+    err = registry_add_range(p_data->dev, range, &added);
+    if (err || !added) {
+        goto range_error_overlap;
+    }
+
+    err = mkdir_session(session);
+    if (err && err != -EEXIST) {
+        goto free_session;
+    }
+
+    err = snap_map_create(p_data->dev, &session_created_on);
+    if (err && err != -EEXIST) {
+        goto free_session;
+    }
+
     sector_t sector = p_data->sector;
     struct page_iter *pos;
     page_iter_for_each(pos, p_data) {
-        save_page(p_data->dev, sector, pos);
+        add_work(session, &session_created_on, p_data->dev, sector, pos);
         sector += (pos->len >> 9);
     }
+range_error_overlap:
+    kfree(range);
+free_session:
+    kfree(session);
 out:
     bio_private_data_destroy(p_data);
     kfree(w);
 }
 
-static void read_bio_enqueue(struct bio_private_data *p) {
+static void read_bio_enqueue(struct bio *orig_bio, struct bio_private_data *p_data) {
     struct file_work *w;
     w = kzalloc(sizeof(*w), GFP_ATOMIC);
     if (!w) {
         pr_err("out of memory");
         return;
     }
-    w->p_data = p;
+    w->orig_bio = orig_bio;
+    w->p_data = p_data;
+    ktime_get_ts64(&w->read_completed_on);
     INIT_WORK(&w->work, snapshot_save);
     queue_work(save_files_wq, &w->work);
 }
@@ -290,10 +370,9 @@ static void read_original_block_end_io(struct bio *bio) {
     if (bio->bi_status != BLK_STS_OK) {
         pr_err("bio completed with error %d", bio->bi_status);
         bio_private_data_destroy(p_data);
-    } else {
-        read_bio_enqueue(p_data);
+        p_data = NULL;
     }
-    submit_bio(orig_bio);
+    read_bio_enqueue(orig_bio, p_data);
     bio_put(bio);
 }
 
