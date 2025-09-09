@@ -41,7 +41,7 @@ static inline bool array16_full(const struct array16 *b) {
 }
 
 static inline void memmove_u16(uint16_t *v, int from, int to, int n) {
-    memmove(&v[to], &v[from], n * sizeof(uin16_t));
+    memmove(&v[to], &v[from], n * sizeof(uint16_t));
 }
 
 static int32_t binsearch(const struct array16 *b, uint16_t x) {
@@ -142,13 +142,9 @@ static int array16_push_range(struct array16 *b, uint16_t lo, uint16_t hi_excl, 
     }
     for (uint16_t x = lo; x < hi_excl; ++x) {
         b->buffer[b->size++] = x;
-        added[i / 64] |= (TO_UINT64(1) << (i & 63));
+        added[(x - lo) / 64] |= (TO_UINT64(1) << ((x - lo) & 63));
     }
     return 0;
-}
-
-static inline void memmove_u16(uint16_t *v, int from, int to, int n) {
-    memmove(&v[to], &v[from], n * sizeof(uint16_t));
 }
 
 int array16_add_range(struct array16 *b, uint16_t lo, uint16_t hi_excl, uint64_t *added) {

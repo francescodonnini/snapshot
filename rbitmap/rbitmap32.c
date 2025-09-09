@@ -3,6 +3,7 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/wordpart.h>
+#define ARRAY_CONTAINER_THRESHOLD (4096)
 #define rcontainer_for_each(pos, bm)\
         for (pos = (bm)->containers; pos < &(bm)->containers[16]; ++pos)\
 
@@ -94,7 +95,7 @@ static int rcontainer_alloc_array16(struct rcontainer *c) {
     return 0;
 }
 
-static int rcontainer_alloc_array16(struct rcontainer *c) {
+static int rcontainer_alloc_bitset16(struct rcontainer *c) {
     c->bitset = bitset16_alloc();
     if (!c->array) {
         return -ENOMEM;
@@ -132,16 +133,18 @@ int rbitmap32_add(struct rbitmap32 *r, uint32_t x, bool *added) {
     int err;
     struct rcontainer *c = rcontainer_nth(r, x);
     mutex_lock(&c->lock);
+    // The default initial container is ARRAY_CONTAINER
     if (rcontainer_null(c)) {
         err = rcontainer_alloc_array16(c);
         if (err) {
             goto unlock;
         }
     }
-    int err;
     switch (c->c_type) {
         case ARRAY_CONTAINER:
-            if (rcontainer_length(c) + 1 >= 4096) {
+            // ARRAY_CONTAINER should hold maximum ARRAY_CONTAINER_THRESHOLD items, past that threshold it is
+            // necessary to convert the array to a bitset
+            if (rcontainer_length(c) + 1 >= ARRAY_CONTAINER_THRESHOLD) {
                 err = array16_to_bitset(c);
                 if (err) {
                     goto unlock;
@@ -168,10 +171,10 @@ unlock:
 static int rcontainer_add_range_unlocked(struct rcontainer *c, uint16_t lo, uint16_t hi_excl, uint64_t *added) {
     if (rcontainer_null(c)) {
         int err;
-        if (hi_excl - lo > 4096) {
+        if (hi_excl - lo > ARRAY_CONTAINER_THRESHOLD) {
             err = rcontainer_alloc_array16(c);
         } else {
-            err = rcontainer_alloc_bitset(c);
+            err = rcontainer_alloc_bitset16(c);
         }
         if (err) return err;
     }
@@ -179,35 +182,47 @@ static int rcontainer_add_range_unlocked(struct rcontainer *c, uint16_t lo, uint
     switch (c->c_type) {
         case ARRAY_CONTAINER:
             err = array16_add_range(c->array, lo, hi_excl, added);
-            if (!err && rcontainer_length(c) >= 4096) {
+            if (!err && rcontainer_length(c) >= ARRAY_CONTAINER_THRESHOLD) {
                 err = array16_to_bitset(c);
             }
             return err; 
         case BITSET_CONTAINER:
-            return bitset16_add_range(c->bitset, lo, hi_excl, added);
+            bitset16_add_range(c->bitset, lo, hi_excl, added);
+            return 0;
         default:
             pr_err("invalid container type %d", c->c_type);
             return -1;
     }
 }
 
+/**
+ * container_last produces the last integer that the i-th contaner can hold, the upper 16 bits are
+ * equal to i * 4096, while the lower 16 bits are all ones.
+ */
 static inline uint32_t container_last(int i) {
-    return (((i + 1) << 9) << 16) | 0xffff;
+    return ((i << 9) << 16) | 0xffff;
 }
 
 int rbitmap32_add_range(struct rbitmap32 *r, uint32_t lo, uint32_t hi_excl, uint64_t *added) {
-    uint16_t lo_upper = upper_16_bits(lo);
-    uint16_t hi_upper = upper_16_bits(hi_excl);
+    // the items in the range [lo, hi_excl] can reside in different containers, it is necessary
+    // to determine in order the subranges associated to container 0, 1, ..., 15
     while (lo < hi_excl) {
-        uint32_t last = min_t(uint32_t, container_last(container_index(lo)) + 1, hi_excl);
+        int idx = container_index(lo);
+        uint32_t last_excl;
+        if (idx < 15) {
+            // one past the last element of container i
+            last_excl = min_t(uint32_t, container_last(idx) + 1, hi_excl);
+        } else {
+            last_excl = hi_excl;
+        }
         struct rcontainer *c = rcontainer_nth(r, lo);
         mutex_lock(&c->lock);
-        int err = rcontainer_add_range_unlocked(c, lower_16_bits(lo), lower_16_bits(last), added);
+        int err = rcontainer_add_range_unlocked(c, lower_16_bits(lo), lower_16_bits(last_excl), added);
         mutex_unlock(&c->lock);
         if (err) {
             return err;
         }
-        lo = last;
+        lo = last_excl;
     }
     return 0;
 }
