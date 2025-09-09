@@ -11,6 +11,7 @@
 #include <linux/rculist.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
+#include <linux/time.h>
 #include <linux/uuid.h>
 
 #define SHA256_LEN (32)
@@ -487,7 +488,7 @@ int registry_session_put(dev_t dev) {
         goto unlock;
     }
     struct session *s = node->session;
-    if (WARN(!s, "no session associated to %d:%d", MAJOR(dev), MINOR(dev))) {
+    if (WARN(!s, "registry_session_put: no session associated to %d:%d", MAJOR(dev), MINOR(dev))) {
         err = -ENOSSN;
         goto unlock;
     }
@@ -505,29 +506,16 @@ unlock:
     return 0;
 }
 
-bool registry_session_id(dev_t dev, char *id) {
-    rcu_read_lock();
-    bool found = false;
-    struct snapshot_metadata *it = registry_get_by_rcu(by_dev, &dev);
-    found = it != NULL;
-    struct session *s = it->session;
-    if (found) {
-        strncpy(id, s->id, get_session_id_len() + 1);
-    }
-    rcu_read_unlock();
-    return found;
-}
-
 static inline bool by_dev2(struct snapshot_metadata *node, const void *args) {
     struct node_dev *nd = (struct node_dev*)args;
     struct session *s = node->session;
     if (!s) {
         return false;
     }
-    return s->dev == nd->dev && timespec64_compare(&s->created_on, nd->time) < 0;
+    return s->dev == nd->dev && timespec64_compare(&s->created_on, nd->time) <= 0;
 }
 
-static inline struct snapshot_metadata *get_by_dev2_rcu(struct timespec64 *time, dev_t dev) {
+static inline struct snapshot_metadata *get_by_dev2_rcu(dev_t dev, struct timespec64 *time) {
     struct node_dev nd = {
         .dev = dev,
         .time = time,
@@ -535,15 +523,19 @@ static inline struct snapshot_metadata *get_by_dev2_rcu(struct timespec64 *time,
     return registry_get_by_rcu(by_dev2, &nd);
 }
 
-bool registry_session_id2(dev_t dev, struct timespec64 *time, char *id, struct timespec64 *created_on) {
+/**
+ * registry_session_id returns true if there exists a session associated to device number dev and read_completed_on >= session creation date,
+ * false otherwise.
+ */
+bool registry_session_id(dev_t dev, struct timespec64 *read_completed_on, char *id, struct timespec64 *created_on) {
     rcu_read_lock();
     bool found = false;
-    struct snapshot_metadata *it = get_by_dev2_rcu(time, dev);
+    struct snapshot_metadata *it = get_by_dev2_rcu(dev, read_completed_on);
     found = it != NULL;
-    struct session *s = it->session;
     if (found) {
+        struct session *s = it->session;
         strncpy(id, s->id, get_session_id_len() + 1);
-        memcpy(time, &s->created_on, sizeof(*time));
+        memcpy(created_on, &s->created_on, sizeof(*created_on));
     }
     rcu_read_unlock();
     return found;
@@ -594,13 +586,13 @@ no_session:
 /**
  * registry_add_range adds a range [sector, sector + len] to a session associated to a device number dev.
  */
-int registry_add_range(dev_t dev, struct b_range *range, bool *added) {
+int registry_add_range(dev_t dev, struct timespec64 *created_on, struct b_range *range, bool *added) {
     rcu_read_lock();
-    struct snapshot_metadata *it = registry_get_by_rcu(by_dev, &dev);
+    struct snapshot_metadata *it = get_by_dev2_rcu(dev, created_on);
     int err;
     if (!it) {
         err = -ENOSSN;
-        pr_err("no session associated to device %d:%d", MAJOR(dev), MINOR(dev));
+        pr_err("registry_add_range: no session associated to device %d:%d", MAJOR(dev), MINOR(dev));
         goto out;
     }
     struct session *s = it->session;
@@ -637,9 +629,9 @@ static inline ssize_t length(struct snapshot_metadata *it) {
     size_t n = strlen(it->dev_name) + 1; // + length of " "
     struct session *s = it->session;
     if (s) {
-        n += strlen(s->id) + 2;
+        n += strlen(s->id) + 1;
     } else {
-        n += strlen("-\n"); // length of "-\n"
+        n += strlen("-\n");
     }
     return n;
 }
@@ -667,7 +659,6 @@ ssize_t registry_show_session(char *buf, size_t size) {
         struct session *s = it->session;
         if (s && s->mntpoints > 0) {
             br += sprintf(&buf[br], "%s\n", s->id);
-            br += sprintf(&buf[br], "\n");
         } else {
             br += sprintf(&buf[br], "-\n");
         }
