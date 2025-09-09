@@ -4,8 +4,6 @@
 #include "bitset16.h"
 #include <linux/mutex.h>
 #include <linux/types.h>
-#define rcontainer_for_each(pos, bm)\
-        for (pos = (bm)->containers; pos < &(bm)->containers[16]; ++pos)\
 
 enum container_type {
     ARRAY_CONTAINER,
@@ -30,6 +28,8 @@ int rbitmap32_init(struct rbitmap32 *r);
 void rbitmap32_destroy(struct rbitmap32 *r);
 
 int rbitmap32_add(struct rbitmap32 *r, uint32_t x, bool *added);
+
+int rbitmap32_add_range(struct rbitmap32 *r, uint32_t lo, uint32_t hi_excl, uint64_t *added);
 
 bool rbitmap32_contains(struct rbitmap32 *r, uint32_t x);
 
