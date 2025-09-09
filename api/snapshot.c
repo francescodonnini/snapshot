@@ -303,9 +303,9 @@ static void snapshot_save(struct work_struct *work) {
     }
     struct bio_private_data *p_data = w->p_data;
     struct timespec64 session_created_on;
-    int err = registry_session_id2(p_data->dev, &w->read_completed_on, session, &session_created_on);
-    if (err) {
-        pr_err("no session associated to device %d:%d", MAJOR(p_data->dev), MINOR(p_data->dev));
+    pr_info("snapshot_save: read_completed_on=%llu sec, %ld nsec", w->read_completed_on.tv_sec, w->read_completed_on.tv_nsec);
+    if (!registry_session_id(p_data->dev, &w->read_completed_on, session, &session_created_on)) {
+        pr_err("snapshot_save: no session associated to device %d:%d", MAJOR(p_data->dev), MINOR(p_data->dev));
         goto free_session;
     }
 
@@ -317,7 +317,7 @@ static void snapshot_save(struct work_struct *work) {
         goto free_session;
     }
     bool added;
-    err = registry_add_range(p_data->dev, range, &added);
+    int err = registry_add_range(p_data->dev, &session_created_on, range, &added);
     if (err || !added) {
         goto range_error_overlap;
     }

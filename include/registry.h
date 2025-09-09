@@ -33,11 +33,9 @@ int registry_session_put(dev_t dev);
 
 void registry_session_destroy(dev_t dev);
 
-bool registry_session_id(dev_t dev, char *id);
+bool registry_session_id(dev_t dev, struct timespec64 *time, char *id, struct timespec64 *created_on);
 
-bool registry_session_id2(dev_t dev, struct timespec64 *time, char *id, struct timespec64 *created_on);
-
-int registry_add_range(dev_t dev, struct b_range *range, bool *added);
+int registry_add_range(dev_t dev, struct timespec64 *created_on, struct b_range *range, bool *added);
 
 int registry_lookup_range(dev_t dev, sector_t sector, unsigned long len, bool *present);
 
