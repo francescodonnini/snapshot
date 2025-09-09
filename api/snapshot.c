@@ -303,7 +303,6 @@ static void snapshot_save(struct work_struct *work) {
     }
     struct bio_private_data *p_data = w->p_data;
     struct timespec64 session_created_on;
-    pr_info("snapshot_save: read_completed_on=%llu sec, %ld nsec", w->read_completed_on.tv_sec, w->read_completed_on.tv_nsec);
     if (!registry_session_id(p_data->dev, &w->read_completed_on, session, &session_created_on)) {
         pr_err("snapshot_save: no session associated to device %d:%d", MAJOR(p_data->dev), MINOR(p_data->dev));
         goto free_session;
