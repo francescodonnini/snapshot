@@ -39,7 +39,7 @@ struct block_work {
 };
 
 struct workqueue_struct *write_bio_wq;
-struct workqueue_struct *save_files_wq;
+struct workqueue_struct *read_bio_wq;
 struct workqueue_struct *save_blocks_wq;
 
 static int mkdir_snapshots(void) {
@@ -104,8 +104,8 @@ int snapshot_init(void) {
         pr_err("out of memory");
         return -ENOMEM;
     }
-    save_files_wq = alloc_workqueue("save-files-wq", WQ_UNBOUND | WQ_MEM_RECLAIM, 0);
-    if (!save_files_wq) {
+    read_bio_wq = alloc_workqueue("save-files-wq", WQ_UNBOUND | WQ_MEM_RECLAIM, 0);
+    if (!read_bio_wq) {
         pr_err("out of memory");
         err = -ENOMEM;
         goto out;
@@ -119,7 +119,7 @@ int snapshot_init(void) {
     return 0;
 
 out2:
-    destroy_workqueue(save_files_wq);
+    destroy_workqueue(read_bio_wq);
 out:
     destroy_workqueue(write_bio_wq);
     return err;
@@ -129,8 +129,8 @@ void snapshot_cleanup(void) {
     if (write_bio_wq) {
         destroy_workqueue(write_bio_wq);
     }
-    if (save_files_wq) {
-        destroy_workqueue(save_files_wq);
+    if (read_bio_wq) {
+        destroy_workqueue(read_bio_wq);
     }
     if (save_blocks_wq) {
         destroy_workqueue(save_blocks_wq);
@@ -357,7 +357,7 @@ static void read_bio_enqueue(struct bio *orig_bio, struct bio_private_data *p_da
     w->p_data = p_data;
     ktime_get_ts64(&w->read_completed_on);
     INIT_WORK(&w->work, snapshot_save);
-    queue_work(save_files_wq, &w->work);
+    queue_work(read_bio_wq, &w->work);
 }
 
 /**
