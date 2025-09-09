@@ -57,19 +57,15 @@ void dbg_dump_bio(const char *prefix, struct bio *bio) {
     pr_debug(
         pr_format(
             "%s"
-            "address             =%p\n"
-            "status              =%s\n"
-            "bdev:\n"
-            "    maj,min         =(%d,%d)\n"
-            "    start_sec,sec_no=%llu,%llu\n"
-            "has_next            =%s\n"
-            "refcnt              =%d\n"
-            "opf                 =%d (%s)\n"
-            "vcnt                =%d\n"
-            "iter::bvec_done     =%s\n"
-            "iter::idx           =%d\n"
-            "iter::sector        =%lld\n"
-            "iter::size          =%u\n"),
+            "addres  =%p\n"
+            "status  =%s\n"
+            "dev     =%d:%d (start=%llu,#sec=%llu)\n"
+            "has_next=%s\n"
+            "refcnt  =%d\n"
+            "opf     =%d (%s)\n"
+            "vcnt    =%d\n"
+            "sector  =%lld\n"
+            "size    =%u\n"),
         prefix,
         bio,
         bio_status_str(bio),
@@ -79,8 +75,6 @@ void dbg_dump_bio(const char *prefix, struct bio *bio) {
         atomic_read(&bio->__bi_cnt),
         bio_op(bio), bio_op_str(bio),
         bio->bi_vcnt,
-        bool_str(bio->bi_iter.bi_bvec_done),
-        bio->bi_iter.bi_idx,
         bio->bi_iter.bi_sector,
         bio->bi_iter.bi_size
     );
