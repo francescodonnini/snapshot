@@ -5,27 +5,20 @@
 #include <linux/types.h>
 
 static int init_shash(const char *alg_name, struct shash_desc **desc_out) {
-    int err = 0;
     struct crypto_shash *alg = crypto_alloc_shash(alg_name, 0, 0);
     if (IS_ERR(alg)) {
-        err = PTR_ERR(alg);
-        goto no_tfm_alloc;
+        return PTR_ERR(alg);
     }
     struct shash_desc *desc;
     size_t desc_size = crypto_shash_descsize(alg) + sizeof(*desc);
     desc = kzalloc(desc_size, GFP_KERNEL);
-    if (desc == NULL) {
-        err = -ENOMEM;
-        goto no_desc_alloc;
+    if (!desc) {
+        crypto_free_shash(alg);
+        return -ENOMEM;
     }
     desc->tfm = alg;
     *desc_out = desc;
     return 0;
-
-no_desc_alloc:
-    crypto_free_shash(alg);
-no_tfm_alloc:
-    return err;
 }
 
 static inline void free_shash_desc(struct shash_desc *desc) {
@@ -77,7 +70,7 @@ int hash(const char *alg_name, const char *key, int key_len, char *out, int out_
     }
     unsigned int digest_size = crypto_shash_digestsize(desc->tfm);
     if (digest_size > out_size) {
-        pr_debug(pr_format("buffer reserved to contain hash digest is not big enough: expected %d but got %d\n"), digest_size, out_size);
+        pr_err("buffer reserved to contain hash digest is not big enough: expected %d but got %d", digest_size, out_size);
         err = -1;
         goto hash_out;
     }
