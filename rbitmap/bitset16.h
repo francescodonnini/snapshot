@@ -1,18 +1,18 @@
 #ifndef BITSET16_H
 #define BITSET16_H
+#include <linux/bitops.h>
 #include <linux/types.h>
-#define BITSET_SIZE (1024)
 
 struct bitset16 {
-    int32_t  size;
-    uint64_t bitmap[BITSET_SIZE];
+    int32_t       size;
+    unsigned long bitmap[BITS_TO_LONGS(65536)];
 };
 
 void bitset_destroy(struct bitset16 *b);
 
 bool bitset16_add(struct bitset16 *b, uint16_t x);
 
-void bitset16_add_range(struct bitset16 *b, uint16_t lo, uint16_t hi_excl, uint64_t *added);
+void bitset16_add_range(struct bitset16 *b, uint16_t lo, uint16_t hi_excl, unsigned long *added);
 
 int bitset16_contains(const struct bitset16 *b, uint16_t x);
 

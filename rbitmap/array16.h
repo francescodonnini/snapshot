@@ -16,7 +16,7 @@ void array16_destroy(struct array16 *b);
 
 int array16_add(struct array16 *b, uint16_t x, bool *added);
 
-int array16_add_range(struct array16 *b, uint16_t lo, uint16_t hi_excl, uint64_t *added);
+int array16_add_range(struct array16 *b, uint16_t lo, uint16_t hi_excl, unsigned long *added);
 
 bool array16_contains(const struct array16 *b, uint16_t x);
 

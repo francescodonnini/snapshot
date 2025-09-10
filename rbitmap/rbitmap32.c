@@ -168,7 +168,7 @@ unlock:
     return err;
 }
 
-static int rcontainer_add_range_unlocked(struct rcontainer *c, uint16_t lo, uint16_t hi_excl, uint64_t *added) {
+static int rcontainer_add_range_unlocked(struct rcontainer *c, uint16_t lo, uint16_t hi_excl, long *added) {
     if (rcontainer_null(c)) {
         int err;
         if (hi_excl - lo > ARRAY_CONTAINER_THRESHOLD) {
@@ -203,7 +203,7 @@ static inline uint32_t container_last(int i) {
     return ((i << 9) << 16) | 0xffff;
 }
 
-int rbitmap32_add_range(struct rbitmap32 *r, uint32_t lo, uint32_t hi_excl, uint64_t *added) {
+int rbitmap32_add_range(struct rbitmap32 *r, uint32_t lo, uint32_t hi_excl, long *added) {
     // the items in the range [lo, hi_excl] can reside in different containers, it is necessary
     // to determine in order the subranges associated to container 0, 1, ..., 15
     while (lo < hi_excl) {

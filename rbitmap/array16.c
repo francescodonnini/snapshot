@@ -1,4 +1,5 @@
 #include "array16.h"
+#include <linux/bitmap.h>
 #include <linux/printk.h>
 #include <linux/slab.h>
 #define TO_UINT64(c) ((uint64_t)c)
@@ -129,7 +130,7 @@ int array16_add(struct array16 *b, uint16_t x, bool *added) {
     return 0;
 }
 
-static int array16_push_range(struct array16 *b, uint16_t lo, uint16_t hi_excl, uint64_t *added) {
+static int array16_push_range(struct array16 *b, uint16_t lo, uint16_t hi_excl, unsigned long *added) {
     if (lo >= hi_excl) {
         return 0;
     }
@@ -140,23 +141,21 @@ static int array16_push_range(struct array16 *b, uint16_t lo, uint16_t hi_excl, 
             return err;
         }
     }
-    for (uint16_t x = lo; x < hi_excl; ++x) {
-        b->buffer[b->size++] = x;
-        added[(x - lo) / 64] |= (TO_UINT64(1) << ((x - lo) & 63));
-    }
+    bitmap_set(added, 0, hi_excl - lo);
     return 0;
 }
 
-int array16_add_range(struct array16 *b, uint16_t lo, uint16_t hi_excl, uint64_t *added) {
+int array16_add_range(struct array16 *b, uint16_t lo, uint16_t hi_excl, unsigned long *added) {
     if (array16_empty(b) || b->buffer[b->size - 1] < lo) {
         return array16_push_range(b, lo, hi_excl, added);
     }
     // pos is either the smallest element greater than lo (but smaller than the last item in the array)
     // or the position of lo in the array
-    int32_t pos = binsearch(b, lo);
-    int32_t i = pos >= 0 ? pos : -pos - 1;
+    int32_t start = binsearch(b, lo);
+    start = start >= 0 ? start : -start - 1;
     // number of items in the range [lo, hi_excl) which are already present in the array
     int32_t common = 0;
+    int32_t i = start;
     uint16_t x = lo;
     // this loop counts how many items in the range are already present in the array and
     // it registers them in the output bitmap. This operation is linear to the minimum size betweem the range and
@@ -164,31 +163,33 @@ int array16_add_range(struct array16 *b, uint16_t lo, uint16_t hi_excl, uint64_t
     while (x < hi_excl && i < b->size && b->buffer[i] < hi_excl) {
         if (b->buffer[i] <= x) {
             if (b->buffer[i] == x) {
-                int32_t bit_pos = x - lo;
-                added[bit_pos / 64] |= (TO_UINT64(1) << (bit_pos & 63));
                 ++common;
+                ++x;
             }
             ++i;
         } else {
+            // if x < b->buffer[i] then x cannot be in the array
+            bitmap_set(added, x - lo, 1);
             ++x;
         }
     }
-    // items to add
-    int32_t n = hi_excl - lo - common;
-    if (n > 0) {
-        if (b->size + n >= b->capacity) {
-            int err = array16_grow(b, b->size + n, true);
-            if (err) return err;
-        }
-        memmove_u16(b->buffer, pos + common, pos + n, b->size - (pos + common));
-        int32_t i = pos;
-        for (uint16_t x = lo; x < hi_excl; ++x) {
-            b->buffer[i++] = x;
-        }
-        b->size += n;
+    if (x < hi_excl) {
+        bitmap_set(added, x - lo, hi_excl - x);
     }
-    for (uint16_t i = 0; i < DIV_ROUND_UP(hi_excl - lo, 64); ++i) {
-        added[i] = ~added[i];
+    // n is the number of items to add to the bitmap
+    int32_t remaining = hi_excl - lo - common;
+    if (remaining > 0) {
+        if (b->size + remaining >= b->capacity) {
+            int err = array16_grow(b, b->size + remaining, true);
+            if (err) {
+                return err;
+            }
+        }
+        memmove_u16(b->buffer, start + common, start + (hi_excl - lo), b->size - (start + common));
+        for (uint16_t x = lo; x < hi_excl; ++x) {
+            b->buffer[start++] = x;
+        }
+        b->size += remaining;
     }
     return 0;
 }
