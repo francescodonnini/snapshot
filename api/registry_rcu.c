@@ -476,7 +476,6 @@ release_lock:
  * immediately but it can be replaced by a new session if an appropriate device is mounted in the system.
  */
 int registry_session_put(dev_t dev) {
-    pr_info("registry_session_put(%d:%d)", MAJOR(dev), MINOR(dev));
     // it indicates that there is no need for an update so we can deallocate
     // the memory previously allocated
     unsigned long flags;

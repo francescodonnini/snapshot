@@ -29,10 +29,12 @@ PWD := $(CURDIR)
 ccflags-y += -I$(src)/include
 ccflags-y += -I$(src)/rbitmap
 
-CFLAGS_kretprobes/get_tree_bdev.o += -DDEBUG
-CFLAGS_kretprobes/mount_dev.o += -DDEBUG
+CFLAGS_api/dbg_dump_bio.o += -DDEBUG
 CFLAGS_api/registry_rcu.o += -DDEBUG
 CFLAGS_api/session.o += -DDEBUG
+CFLAGS_kretprobes/get_tree_bdev.o += -DDEBUG
+CFLAGS_kretprobes/mount_dev.o += -DDEBUG
+CFLAGS_kretprobes/submit_bio.o += -DDEBUG
 CFLAGS_probes/handlers.o += -DDEBUG
 
 all: 

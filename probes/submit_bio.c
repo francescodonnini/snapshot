@@ -78,6 +78,11 @@ static bool skip_handler(struct bio *bio) {
         pr_err("cannot read device number from bio struct");
         return true;
     }
+
+    if (bio->bi_bdev->bd_dev == MKDEV(7, 0)) {
+        pr_info("intercepted bio: %llu, %llu", bio->bi_iter.bi_sector, bio->bi_iter.bi_size);
+    }
+
     int err = registry_lookup_range(bio->bi_bdev->bd_dev, bio->bi_iter.bi_sector, bio->bi_iter.bi_sector + DIV_ROUND_UP(bio_size(bio), 512));
     if (err) {
         if (err != -ENOSSN && err != -EEXIST) {
@@ -85,6 +90,11 @@ static bool skip_handler(struct bio *bio) {
         }
         return true;
     }
+
+   if (bio->bi_bdev->bd_dev == MKDEV(7, 0)) {
+        pr_info("processing bio: %llu, %llu", bio->bi_iter.bi_sector, bio->bi_iter.bi_size);
+    }
+
     return false;
 }
 

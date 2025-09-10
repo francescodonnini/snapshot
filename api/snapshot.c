@@ -290,6 +290,9 @@ static void snapshot_save(struct work_struct *work) {
     }
     int err = registry_add_range(p_data->dev, &session_created_on, range);
     if (err) {
+        if (err == -EEXIST) {
+            pr_info("skipping bio: %llu, %llu", p_data->sector, p_data->sector + DIV_ROUND_UP(p_data->bytes, 512));
+        }
         goto range_error_overlap;
     }
 
