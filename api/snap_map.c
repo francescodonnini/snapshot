@@ -89,6 +89,17 @@ int snap_map_create(dev_t dev, struct timespec64 *created_on) {
     return try_snap_map_create(dev, created_on);
 }
 
+int snap_map_add_range(dev_t dev, struct timespec64 *created_on, sector_t lo, sector_t hi_excl, unsigned long *added) {
+    int err;
+    int rdx = srcu_read_lock(&srcu);
+    struct snap_map *map = snap_map_lookup_srcu(dev, created_on);
+    if (map) {
+        err = rbitmap32_add_range(&map->bitmap, lo, hi_excl, added);
+    }
+    srcu_read_unlock(&srcu, rdx);
+    return err;
+}
+
 /**
  * Aggiunge una regione da 512B nella bitmap, una bitmap è associata a un numero di dispositivo e la data di creazione della sessione.
  * Se nessuna bitmap è associata a un numero di dispositivo, allora si deve creare.
