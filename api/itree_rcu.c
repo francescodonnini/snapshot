@@ -13,28 +13,22 @@ void itree_destroy(struct session *s) {
     mtree_destroy(&s->tree);
 }
 
-int itree_add(struct session *s, struct b_range *range, bool *added) {
-    if (itree_subset_of(s, range->start, range->end)) {
-        *added = false;
-        return 0;
+int itree_add(struct session *s, struct b_range *range) {
+    if (itree_subset_of(s, range->start, range->end_excl)) {
+        return -EEXIST;
     }
-    int err = mtree_store_range(&s->tree, range->start, range->end, range, GFP_KERNEL);
-    if (!err) {
-        *added = true;
-    }
-    return err;
+    return mtree_store_range(&s->tree, range->start, range->end_excl, range, GFP_KERNEL);
 }
 
 /**
  * itree_subset_of returns true if the range identified by start and len is completely contained in the tree,
  * false otherwise.
  */
-bool itree_subset_of(struct session *s, sector_t start, unsigned long len) {
+bool itree_subset_of(struct session *s, unsigned long start, unsigned long end_excl) {
     rcu_read_lock();
     long unsigned index = start;
-    long unsigned end = start + (len >> 9);
-    struct b_range *r = mt_find(&s->tree, &index, end);
-    bool contained = r && start >= r->start && end <= r->end;
+    struct b_range *r = mt_find(&s->tree, &index, end_excl);
+    bool contained = r && start >= r->start && end_excl <= r->end_excl;
     rcu_read_unlock();
     return contained;
 }

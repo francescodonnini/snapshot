@@ -11,8 +11,8 @@ int itree_create(struct session *s);
 
 void itree_destroy(struct session *s);
 
-int itree_add(struct session *s, struct b_range *range, bool *added);
+int itree_add(struct session *s, struct b_range *range);
 
-bool itree_subset_of(struct session *s, sector_t start, unsigned long len);
+bool itree_subset_of(struct session *s, unsigned long start, unsigned long end_excl);
 
 #endif

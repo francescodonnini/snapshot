@@ -586,17 +586,17 @@ no_session:
 /**
  * registry_add_range adds a range [sector, sector + len] to a session associated to a device number dev.
  */
-int registry_add_range(dev_t dev, struct timespec64 *created_on, struct b_range *range, bool *added) {
+int registry_add_range(dev_t dev, struct timespec64 *created_on, struct b_range *range) {
     rcu_read_lock();
     struct snapshot_metadata *it = get_by_dev2_rcu(dev, created_on);
     int err;
     if (!it) {
         err = -ENOSSN;
-        pr_err("registry_add_range: no session associated to device %d:%d", MAJOR(dev), MINOR(dev));
+        pr_debug(pr_format("registry_add_range: no session associated to device %d:%d"), MAJOR(dev), MINOR(dev));
         goto out;
     }
     struct session *s = it->session;
-    err = itree_add(s, range, added);
+    err = itree_add(s, range);
 out:
     rcu_read_unlock();
     return err;
@@ -609,17 +609,14 @@ out:
  * present is an output parameter, after the function returns, it's equal to true if the sector has been
  * already registered by a previous write request, false otherwise.
  */
-int registry_lookup_range(dev_t dev, sector_t sector, unsigned long len, bool *present) {
+int registry_lookup_range(dev_t dev, unsigned long start, unsigned long end_excl) {
     rcu_read_lock();
     struct snapshot_metadata *it = registry_get_by_rcu(by_dev, &dev);
-    *present = false;
     int err;
     if (!it) {
         err = -ENOSSN;
     } else {
-        struct session *s = it->session;
-        *present = itree_subset_of(s, sector, len);
-        err = 0;
+        err = itree_subset_of(it->session, start, end_excl) ? -EEXIST : 0;
     }
     rcu_read_unlock();
     return err;

@@ -238,7 +238,7 @@ static void save_block(struct work_struct *work) {
     unsigned long lo = 0, hi_excl = 0;
     while (small_bitmap_next_set_region(&bitmap, &lo, &hi_excl)) {
         sprintf(path, "%s/%s/%llu", ROOT_DIR, w->session_id, w->sector + lo);
-        file_write(path, &w->data, lo, (hi_excl - lo) * 512);
+        file_write(path, &w->data, lo * 512, (hi_excl - lo) * 512);
     }
     small_bitmap_free(&bitmap);
 free_path:
@@ -283,14 +283,13 @@ static void snapshot_save(struct work_struct *work) {
 
     // We completed successfully the read of the region to snapshot, so we
     // can add the whole range to the tree.
-    struct b_range *range = b_range_alloc(p_data->sector, p_data->bytes);
+    struct b_range *range = b_range_alloc(p_data->sector, p_data->sector + DIV_ROUND_UP(p_data->bytes, 512));
     if (!range) {
         pr_err("out of memory");
         goto free_session;
     }
-    bool added;
-    int err = registry_add_range(p_data->dev, &session_created_on, range, &added);
-    if (err || !added) {
+    int err = registry_add_range(p_data->dev, &session_created_on, range);
+    if (err) {
         goto range_error_overlap;
     }
 

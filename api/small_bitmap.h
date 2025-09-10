@@ -2,23 +2,24 @@
 #define AOS_SMALL_BITMAP_H
 #include <linux/bitmap.h>
 #include <linux/types.h>
+#define INLINE_MAP_SIZE (4)
 
 struct small_bitmap {
     int   nbits;
     long *map;
-    // can contains up to 512 items
-    long  __inline_map[8];
+    // can contains up to 128 items
+    long  __inline_map[INLINE_MAP_SIZE];
 };
 
-static inline long *small_bitmap_zeros(struct small_bitmap *b, int n) {
-    int capacity = BITS_TO_LONGS(n);
-    if (capacity > 8) {
-        b->map = bitmap_zalloc(n, GFP_KERNEL);
+static inline long *small_bitmap_zeros(struct small_bitmap *b, int nbits) {
+    int capacity = BITS_TO_LONGS(nbits);
+    if (capacity > INLINE_MAP_SIZE) {
+        b->map = bitmap_zalloc(nbits, GFP_KERNEL);
     } else {
         b->map = b->__inline_map;
-        bitmap_zero(b->map, n);
+        bitmap_zero(b->map, nbits);
     }
-    b->nbits = n;
+    b->nbits = nbits;
     return b->map;
 }
 

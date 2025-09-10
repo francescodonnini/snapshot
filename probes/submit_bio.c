@@ -78,15 +78,14 @@ static bool skip_handler(struct bio *bio) {
         pr_err("cannot read device number from bio struct");
         return true;
     }
-    bool present;
-    int err = registry_lookup_range(bio->bi_bdev->bd_dev, bio->bi_iter.bi_sector, bio_size(bio), &present);
+    int err = registry_lookup_range(bio->bi_bdev->bd_dev, bio->bi_iter.bi_sector, bio->bi_iter.bi_sector + DIV_ROUND_UP(bio_size(bio), 512));
     if (err) {
-        if (err != -ENOSSN) {
+        if (err != -ENOSSN && err != -EEXIST) {
             pr_err("registry_lookup_range completed with error %d", err);
         }
         return true;
     }
-    return present;
+    return false;
 }
 
 /**
