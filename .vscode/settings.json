@@ -89,7 +89,10 @@
         "rwsem.h": "c",
         "version.h": "c",
         "srcu.h": "c",
-        "snap_map.h": "c"
+        "snap_map.h": "c",
+        "math64.h": "c",
+        "time.h": "c",
+        "time_types.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
     "makefile.configureOnOpen": true,

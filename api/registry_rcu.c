@@ -4,6 +4,7 @@
 #include "itree.h"
 #include "pr_format.h"
 #include "session.h"
+#include "snap_map.h"
 #include "snapshot.h"
 #include <linux/blkdev.h>
 #include <linux/list.h>
@@ -220,11 +221,7 @@ int registry_insert(const char *dev_name, const char *password) {
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
     int err;
-    struct node_name name = { 
-        .hash = node->dev_name_hash,
-        .name = node->dev_name
-    };
-    if (registry_lookup_rcu(by_name, &name)) {
+    if (get_by_name(dev_name)) {
         err = -EDUPNAME;
     } else {
         list_add_rcu(&node->list, &registry_db);
@@ -284,38 +281,40 @@ int registry_delete(const char *dev_name, const char *password) {
 static void free_session_rcu(struct rcu_head *head) {
     struct snapshot_metadata *node = container_of(head, struct snapshot_metadata, rcu);
     if (node->session) {
+        struct session *s = node->session;
         session_destroy(node->session);
+        snap_map_destroy(s->dev, &s->created_on);
     }
     kfree(node);
 }
 
 int registry_session_prealloc(const char *dev_name, dev_t dev) {
-    struct snapshot_metadata *node = node_alloc_noname(GFP_ATOMIC);
-    if (!node) {
+    struct snapshot_metadata *new_node = node_alloc_noname(GFP_ATOMIC);
+    if (!new_node) {
         pr_err("out of memory");
         return -ENOMEM;
     }
-    struct session *session = session_create(dev);
-    if (!session) {
-        pr_debug(pr_format("out of memory"));
-        kfree(node);
+    struct session *new_ssn = session_create(dev);
+    if (!new_ssn) {
+        pr_err("out of memory");
+        kfree(new_node);
         return -ENOMEM;
     }
 
     int err = 0;
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
-    struct snapshot_metadata *old = get_by_name(dev_name);
-    if (!old) {
+    struct snapshot_metadata *current_node = get_by_name(dev_name);
+    if (!current_node) {
         pr_debug(pr_format("no device associated to device=%s,%d:%d"), dev_name, MAJOR(dev), MINOR(dev));
         err = -EWRONGCRED;
         goto release_lock; // no device
     }
     bool free_old_session = false; // if true, then the old session should be scheduled for deferred deallocation
-    struct session *s = old->session;
-    if (s) {
-        if (s->mntpoints > 0) { // current session is still active
-            pr_err("usage counter of session %s is greater than 0", s->id);
+    struct session *current_ssn = current_node->session;
+    if (current_ssn) {
+        if (current_ssn->mntpoints > 0) { // current session is still active
+            pr_err("usage counter of session %s is greater than 0", current_ssn->id);
             err = -1;
             goto release_lock;
         } else {
@@ -323,22 +322,23 @@ int registry_session_prealloc(const char *dev_name, dev_t dev) {
             free_old_session = true;
         }
     }
-    session->pending = true;
-    node->session = session;
-    node->dev_name = old->dev_name;
-    node->dev_name_hash = old->dev_name_hash;
-    memcpy(node->password, old->password, SHA256_LEN);
-    list_replace_rcu(&old->list, &node->list);
+    new_ssn->pending = true;
+    new_node->session = new_ssn;
+    new_node->dev_name = current_node->dev_name;
+    new_node->dev_name_hash = current_node->dev_name_hash;
+    memcpy(new_node->password, current_node->password, SHA256_LEN);
+    list_replace_rcu(&current_node->list, &new_node->list);
     spin_unlock_irqrestore(&write_lock, flags);
+
     if (free_old_session) {
-        call_rcu(&old->rcu, free_session_rcu);
+        call_rcu(&current_node->rcu, free_session_rcu);
     }
     return err;
 
 release_lock:
     spin_unlock_irqrestore(&write_lock, flags);
-    kfree(node);
-    session_destroy(session);
+    kfree(new_node);
+    session_destroy(new_ssn);
     return err;
 }
 
@@ -476,6 +476,7 @@ release_lock:
  * immediately but it can be replaced by a new session if an appropriate device is mounted in the system.
  */
 int registry_session_put(dev_t dev) {
+    pr_info("registry_session_put(%d:%d)", MAJOR(dev), MINOR(dev));
     // it indicates that there is no need for an update so we can deallocate
     // the memory previously allocated
     unsigned long flags;
@@ -496,17 +497,13 @@ int registry_session_put(dev_t dev) {
         err = -ENOSSN;
         goto unlock;
     }
-
     s->mntpoints--;
-    if (s->pending) {
-        s->pending = false;
-    }
 unlock:
     spin_unlock_irqrestore(&write_lock, flags);
     return 0;
 }
 
-static inline bool by_dev2(struct snapshot_metadata *node, const void *args) {
+static inline bool by_dev_and_time_ge(struct snapshot_metadata *node, const void *args) {
     struct node_dev *nd = (struct node_dev*)args;
     struct session *s = node->session;
     if (!s) {
@@ -515,12 +512,12 @@ static inline bool by_dev2(struct snapshot_metadata *node, const void *args) {
     return s->dev == nd->dev && timespec64_compare(&s->created_on, nd->time) <= 0;
 }
 
-static inline struct snapshot_metadata *get_by_dev2_rcu(dev_t dev, struct timespec64 *time) {
+static inline struct snapshot_metadata *get_by_dev_and_time_ge_rcu(dev_t dev, struct timespec64 *time) {
     struct node_dev nd = {
         .dev = dev,
         .time = time,
     };
-    return registry_get_by_rcu(by_dev2, &nd);
+    return registry_get_by_rcu(by_dev_and_time_ge, &nd);
 }
 
 /**
@@ -530,7 +527,7 @@ static inline struct snapshot_metadata *get_by_dev2_rcu(dev_t dev, struct timesp
 bool registry_session_id(dev_t dev, struct timespec64 *read_completed_on, char *id, struct timespec64 *created_on) {
     rcu_read_lock();
     bool found = false;
-    struct snapshot_metadata *it = get_by_dev2_rcu(dev, read_completed_on);
+    struct snapshot_metadata *it = get_by_dev_and_time_ge_rcu(dev, read_completed_on);
     found = it != NULL;
     if (found) {
         struct session *s = it->session;
@@ -588,7 +585,7 @@ no_session:
  */
 int registry_add_range(dev_t dev, struct timespec64 *created_on, struct b_range *range) {
     rcu_read_lock();
-    struct snapshot_metadata *it = get_by_dev2_rcu(dev, created_on);
+    struct snapshot_metadata *it = get_by_dev_and_time_ge_rcu(dev, created_on);
     int err;
     if (!it) {
         err = -ENOSSN;

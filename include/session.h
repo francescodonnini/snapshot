@@ -1,18 +1,19 @@
 #ifndef AOS_SESSION_H
 #define AOS_SESSION_H
 #include <linux/maple_tree.h>
-#include <linux/rhashtable.h>
 #include <linux/spinlock.h>
+#include <linux/time64.h>
 #include <linux/types.h>
 #define ENOSSN     5004
 
 struct session {
-    dev_t                  dev;
-    char                  *id;
-    struct timespec64      created_on;
-    bool                   pending;
-    int                    mntpoints;
-    struct maple_tree      tree;
+    dev_t              dev;
+    char              *id;
+    struct timespec64  created_on;
+    bool               pending;
+    int                mntpoints;
+    struct maple_tree  tree;
+    struct rcu_head    rcu;
 };
 
 int get_session_id_len(void);

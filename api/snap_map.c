@@ -1,4 +1,5 @@
 #include "snap_map.h"
+#include <linux/rculist.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/srcu.h>
@@ -25,6 +26,30 @@ void snap_map_cleanup(void) {
     }
 }
 
+static void snap_map_destroy_srcu(struct callback_head *head) {
+    struct snap_map *p = container_of(head, struct snap_map, head);
+    rbitmap32_destroy(&p->bitmap);
+    kfree(p);
+}
+
+void snap_map_destroy(dev_t dev, struct timespec64 *created_on) {
+    unsigned long flags;
+    spin_lock_irqsave(&write_lock, flags);
+    bool found;
+    struct snap_map *pos;
+    list_for_each_entry(pos, &map_list, list) {
+        found = pos->device == dev && timespec64_equal(&pos->session_created_on, created_on);
+        if (found) {
+            list_del_rcu(&pos->list);
+            break;
+        }
+    }
+    spin_unlock_irqrestore(&write_lock, flags);
+    if (found) {
+        call_srcu(&srcu, &pos->head, snap_map_destroy_srcu);
+    }
+}
+
 static struct snap_map* snap_map_alloc(dev_t dev, struct timespec64 *created_on) {
     struct snap_map *map;
     map = kzalloc(sizeof(*map), GFP_KERNEL);
@@ -43,7 +68,7 @@ static struct snap_map* snap_map_alloc(dev_t dev, struct timespec64 *created_on)
 
 static struct snap_map *snap_map_lookup_srcu(dev_t dev, struct timespec64 *created_on) {
     struct snap_map *pos;
-    list_for_each_entry(pos, &map_list, list) {
+    list_for_each_entry_srcu(pos, &map_list, list, srcu_read_lock_held(&srcu)) {
         if (pos->device == dev && timespec64_equal(&pos->session_created_on, created_on)) {
             return pos;
         }

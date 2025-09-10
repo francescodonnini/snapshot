@@ -16,7 +16,10 @@ snapshot-objs := 	api/activate_snapshot.o \
 					rbitmap/bitset16.o \
 					rbitmap/rbitmap32.o \
 					probes/handlers.o \
-					probes/mount_dev.o \
+					probes/ext4_fill_super.o \
+					probes/get_tree_bdev.o \
+					probes/mount_bdev.o \
+					probes/path_umount.o \
 					probes/submit_bio.o \
 					probes/update_session.o \
 					main.o \
@@ -30,6 +33,7 @@ CFLAGS_kretprobes/get_tree_bdev.o += -DDEBUG
 CFLAGS_kretprobes/mount_dev.o += -DDEBUG
 CFLAGS_api/registry_rcu.o += -DDEBUG
 CFLAGS_api/session.o += -DDEBUG
+CFLAGS_probes/handlers.o += -DDEBUG
 
 all: 
 		make -C /lib/modules/$(shell uname -r)/build M=$(PWD)  modules 
