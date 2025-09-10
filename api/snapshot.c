@@ -2,9 +2,11 @@
 #include "itree.h"
 #include "pr_format.h"
 #include "registry.h"
+#include "small_bitmap.h"
 #include "snap_map.h"
 #include "snapshot.h"
 #include <linux/bio.h>
+#include <linux/bitmap.h>
 #include <linux/bvec.h>
 #include <linux/dcache.h>
 #include <linux/fs.h>
@@ -211,67 +213,38 @@ out_unlock_put:
 
 static void save_block(struct work_struct *work) {
     struct block_work *w = container_of(work, struct block_work, work);
-    size_t n = strlen(ROOT_DIR) + strlen(w->session_id) + MAX_NAME_LEN + 3;
-    if (n > PATH_MAX) {
+    size_t path_len = strlen(ROOT_DIR) + strlen(w->session_id) + MAX_NAME_LEN + 3;
+    if (path_len > PATH_MAX) {
         goto out;
     }
-    char *path = kzalloc(n, GFP_KERNEL);
+    char *path = kzalloc(path_len, GFP_KERNEL);
     if (!path) {
+        pr_err("out of memory");
         goto out;
     }
-    struct page_iter *iter = &w->data;
-    sector_t end = w->sector + (iter->len >> 9);
-    sector_t lo_sector = w->sector;
-    unsigned long lo = 0;
-    unsigned long acc_len = 0;
-    for (sector_t s = w->sector; s < end; s++) {
-        bool added;
-        int err = snap_map_add_sector(w->device, &w->session_created_on, s, &added);
-        if (err) {
-            pr_err("cannot add sector %llu to device %d:%d", s, MAJOR(w->device), MINOR(w->device));
-            continue;
-        }
-        if (added) {
-            acc_len += 512;
-        } else {
-            if (acc_len > 0) {
-                sprintf(path, "%s/%s/%llu", ROOT_DIR, w->session_id, lo_sector);
-                file_write(path, iter, lo, acc_len);
-                lo += acc_len;
-                acc_len = 0;
-            }
-            lo += 512;
-            lo_sector = s + 1;
-        }
+    sector_t sectors_num = w->data.len >> 9;
+    sector_t last_excl = w->sector + sectors_num;
+    struct small_bitmap bitmap;
+    unsigned long *added = small_bitmap_zeros(&bitmap,  sectors_num);
+    if (!added) {
+        pr_err("out of memory");
+        goto free_path;
     }
-    if (acc_len > 0) {
-        sprintf(path, "%s/%s/%llu", ROOT_DIR, w->session_id, lo_sector);
-        file_write(path, iter, lo, acc_len);
+    int err = snap_map_add_range(w->device, &w->session_created_on, w->sector, last_excl, added);
+    if (err) {
+        pr_err("cannot add range [%llu, %llu), got error %d", w->sector, last_excl, err);
+        goto free_path;
     }
+    unsigned long lo = 0, hi_excl = 0;
+    while (small_bitmap_next_set_region(&bitmap, &lo, &hi_excl)) {
+        sprintf(path, "%s/%s/%llu", ROOT_DIR, w->session_id, w->sector + lo);
+        file_write(path, &w->data, lo, (hi_excl - lo) * 512);
+    }
+    small_bitmap_free(&bitmap);
+free_path:
     kfree(path);
 out:
     kfree(w);
-}
-
-static void add_work(
-    const char *session,
-    struct timespec64 *created_on,
-    dev_t dev,
-    sector_t sector,
-    struct page_iter *p_iter) {
-    struct block_work *w;
-    w = kzalloc(sizeof(*w) + get_session_id_len() + 1, GFP_KERNEL);
-    if (!w) {
-        pr_err("out of memory");
-        return;
-    }
-    w->device = dev;
-    w->sector = sector;
-    memcpy(w->session_id, session, get_session_id_len());
-    memcpy(&w->data, p_iter, sizeof(struct page_iter));
-    memcpy(&w->session_created_on, created_on, sizeof(struct timespec64));
-    INIT_WORK(&w->work, save_block);
-    queue_work(save_blocks_wq, &w->work);
 }
 
 static inline void free_all_pages(struct bio_private_data *p_data) {
@@ -334,7 +307,19 @@ static void snapshot_save(struct work_struct *work) {
     sector_t sector = p_data->sector;
     struct page_iter *pos;
     page_iter_for_each(pos, p_data) {
-        add_work(session, &session_created_on, p_data->dev, sector, pos);
+        struct block_work *b;
+        b = kzalloc(sizeof(*b) + get_session_id_len() + 1, GFP_KERNEL);
+        if (!b) {
+            pr_err("out of memory");
+            break;
+        }
+        b->device = p_data->dev;
+        b->sector = sector;
+        memcpy(b->session_id, session, get_session_id_len());
+        memcpy(&b->session_created_on, &session_created_on, sizeof(session_created_on));
+        memcpy(&b->data, pos, sizeof(*pos));
+        INIT_WORK(&b->work, save_block);
+        queue_work(save_blocks_wq, &b->work);
         sector += (pos->len >> 9);
     }
 range_error_overlap:
