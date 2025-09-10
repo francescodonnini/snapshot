@@ -29,7 +29,7 @@ void rbitmap32_destroy(struct rbitmap32 *r);
 
 int rbitmap32_add(struct rbitmap32 *r, uint32_t x, bool *added);
 
-int rbitmap32_add_range(struct rbitmap32 *r, uint32_t lo, uint32_t hi_excl, long *added);
+int rbitmap32_add_range(struct rbitmap32 *r, uint32_t lo, uint32_t hi_excl, unsigned long *added);
 
 bool rbitmap32_contains(struct rbitmap32 *r, uint32_t x);
 

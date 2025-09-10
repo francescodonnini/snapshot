@@ -2,7 +2,6 @@
 #include <linux/bitmap.h>
 #include <linux/printk.h>
 #include <linux/slab.h>
-#define TO_UINT64(c) ((uint64_t)c)
 
 static int array16_init(struct array16 *b, int32_t capacity) {
     uint16_t *buffer = kmalloc_array(capacity, sizeof(uint16_t), GFP_KERNEL);
