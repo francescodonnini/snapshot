@@ -74,12 +74,10 @@ static int array16_to_bitset(struct rcontainer *c) {
         return -ENOMEM;
     }
     if (!rcontainer_null(c)) {
-        struct array16 *array = c->array;
-        for (int32_t i = 0; i < array->size; ++i) {
-            int32_t pos = array->buffer[i] >> 6;
-            bitset->bitmap[pos] |= (pos & 63);
+        for (int32_t i = 0; i < c->array->size; ++i) {
+            bitmap_set(bitset->bitmap, c->array->buffer[i], 1);
         }
-        array16_destroy(array);
+        array16_destroy(c->array);
     }
     c->c_type = BITSET_CONTAINER;
     c->bitset = bitset;
@@ -117,7 +115,7 @@ static int32_t rcontainer_length(const struct rcontainer *c) {
 }
 
 static inline int32_t container_index(uint32_t x) {
-    return upper_16_bits(x) >> 12;
+    return upper_16_bits(x) / 4096;
 }
 
 static struct rcontainer* rcontainer_nth(struct rbitmap32 *r, uint32_t x) {

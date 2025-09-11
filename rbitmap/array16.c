@@ -48,7 +48,7 @@ static int32_t binsearch(const struct array16 *b, uint16_t x) {
     int32_t lo = 0;
     int32_t hi = b->size - 1;
     while (lo <= hi) {
-        int32_t m = lo + ((hi - lo) >> 1);
+        int32_t m = lo + ((hi - lo) / 2);
         uint16_t mx = b->buffer[m];
         if (x < mx) {
             hi = m - 1;
@@ -66,12 +66,12 @@ static inline int32_t grow_capacity(int32_t capacity) {
         return DEFAULT_INITIAL_CAPACITY;
     }
     if (capacity <= 64) {
-        return capacity << 1;
+        return capacity * 2;
     }
     if (capacity <= 1024) {
-        return ((capacity << 1) + capacity) >> 1;
+        return capacity * 3 / 2;
     }
-    return ((capacity << 2) + capacity) >> 1;
+    return capacity * 5 / 4;
 }
 
 static int array16_grow(struct array16 *b, int32_t min, bool copy) {
