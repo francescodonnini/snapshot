@@ -21,8 +21,8 @@ void snap_map_cleanup(void) {
     synchronize_srcu(&srcu);
     struct snap_map *pos, *tmp;
     list_for_each_entry_safe(pos, tmp, &map_list, list) {
-        rbitmap32_destroy(&tmp->bitmap);
-        kfree(tmp);
+        rbitmap32_destroy(&pos->bitmap);
+        kfree(pos);
     }
 }
 
