@@ -17,7 +17,7 @@ int itree_add(struct session *s, struct b_range *range) {
     if (itree_subset_of(s, range->start, range->end_excl)) {
         return -EEXIST;
     }
-    return mtree_store_range(&s->tree, range->start, range->end_excl, range, GFP_KERNEL);
+    return mtree_store_range(&s->tree, range->start, range->end_excl, range, GFP_NOWAIT);
 }
 
 static void update_span(struct b_range *q, struct b_range *r) {
