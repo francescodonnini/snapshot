@@ -12,5 +12,6 @@
 **/*.symvers
 **/*.symvers.cmd
 /docs/*
+/logs/*
 .vscode/c_cpp_properties.json
 **/*.bin
