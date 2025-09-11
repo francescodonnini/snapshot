@@ -211,6 +211,13 @@ out_unlock_put:
     return err;
 }
 
+static char *bitmap_fmt(char *buf, size_t n, unsigned long *map, size_t nbits) {
+    for (size_t i = 0; i < min_t(size_t, n, nbits); ++i) {
+        buf[i] = test_bit(i, map) ? '1' : '0';
+    }
+    return buf;
+}
+
 static void save_block(struct work_struct *work) {
     struct block_work *w = container_of(work, struct block_work, work);
     size_t path_len = strlen(ROOT_DIR) + strlen(w->session_id) + MAX_NAME_LEN + 3;
@@ -222,7 +229,7 @@ static void save_block(struct work_struct *work) {
         pr_err("out of memory");
         goto out;
     }
-    sector_t sectors_num = w->data.len >> 9;
+    sector_t sectors_num = w->data.len / 512;
     sector_t last_excl = w->sector + sectors_num;
     struct small_bitmap bitmap;
     unsigned long *added = small_bitmap_zeros(&bitmap,  sectors_num);
@@ -235,8 +242,11 @@ static void save_block(struct work_struct *work) {
         pr_err("cannot add range [%llu, %llu), got error %d", w->sector, last_excl, err);
         goto free_path;
     }
+    char map_buf[256] = {0};
+    pr_info("save_block: snap_map_add_range(%llu, %llu) -> %s", w->sector, last_excl, bitmap_fmt(map_buf, 255, added, sectors_num));
     unsigned long lo = 0, hi_excl = 0;
     while (small_bitmap_next_set_region(&bitmap, &lo, &hi_excl)) {
+        pr_info("save_block: %llu [%lu, %lu)", w->sector + lo, lo * 512, (hi_excl - lo) * 512);
         sprintf(path, "%s/%s/%llu", ROOT_DIR, w->session_id, w->sector + lo);
         file_write(path, &w->data, lo * 512, (hi_excl - lo) * 512);
     }
@@ -283,7 +293,7 @@ static void snapshot_save(struct work_struct *work) {
 
     // We completed successfully the read of the region to snapshot, so we
     // can add the whole range to the tree.
-    struct b_range *range = b_range_alloc(p_data->sector, p_data->sector + DIV_ROUND_UP(p_data->bytes, 512));
+    struct b_range *range = b_range_alloc(p_data->sector, p_data->sector + p_data->bytes / 512);
     if (!range) {
         pr_err("out of memory");
         goto free_session;
@@ -291,7 +301,7 @@ static void snapshot_save(struct work_struct *work) {
     int err = registry_add_range(p_data->dev, &session_created_on, range);
     if (err) {
         if (err == -EEXIST) {
-            pr_info("skipping bio: %llu, %llu", p_data->sector, p_data->sector + DIV_ROUND_UP(p_data->bytes, 512));
+            pr_info("skipping bio: %llu, %llu", p_data->sector, p_data->sector + p_data->bytes / 512);
         } else {
             kfree(range);
         }
@@ -323,7 +333,7 @@ static void snapshot_save(struct work_struct *work) {
         memcpy(&b->data, pos, sizeof(*pos));
         INIT_WORK(&b->work, save_block);
         queue_work(save_blocks_wq, &b->work);
-        sector += (pos->len >> 9);
+        sector += (pos->len / 512);
     }
 free_session:
     kfree(session);
@@ -357,6 +367,8 @@ static void read_original_block_end_io(struct bio *bio) {
         pr_err("bio completed with error %d", bio->bi_status);
         bio_private_data_destroy(p_data);
         p_data = NULL;
+    } else {
+        pr_info("read_original_block_end_io: read sector %llu, %lu bytes", p_data->sector, p_data->bytes);
     }
     read_bio_enqueue(orig_bio, p_data);
     bio_put(bio);
@@ -373,7 +385,7 @@ static inline int add_page(struct bio_vec *bvec, struct bio *bio) {
         return 0;
     }
 
-    struct page *page = alloc_pages(GFP_KERNEL, get_order(bvec->bv_len));
+    struct page *page = alloc_pages(GFP_KERNEL | __GFP_ZERO, get_order(bvec->bv_len));
     if (!page) {
         pr_err("out of memory");
         return -ENOMEM;

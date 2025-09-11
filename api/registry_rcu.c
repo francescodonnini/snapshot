@@ -497,6 +497,7 @@ int registry_session_put(dev_t dev) {
         goto unlock;
     }
     s->mntpoints--;
+    pr_info("decremented usage counter of session %s, new value is %d", s->id, s->mntpoints);
 unlock:
     spin_unlock_irqrestore(&write_lock, flags);
     return 0;

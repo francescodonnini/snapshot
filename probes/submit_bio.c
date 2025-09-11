@@ -80,10 +80,10 @@ static bool skip_handler(struct bio *bio) {
     }
 
     if (bio->bi_bdev->bd_dev == MKDEV(7, 6)) {
-        pr_info("submit_bio: WR [%llu, %llu)", bio->bi_iter.bi_sector,  bio->bi_iter.bi_sector + DIV_ROUND_UP(bio_size(bio), 512));
+        pr_info("submit_bio: WR [%llu, %llu)", bio->bi_iter.bi_sector,  bio->bi_iter.bi_sector + bio_size(bio) / 512);
     }
 
-    int err = registry_lookup_range(bio->bi_bdev->bd_dev, bio->bi_iter.bi_sector, bio->bi_iter.bi_sector + DIV_ROUND_UP(bio_size(bio), 512));
+    int err = registry_lookup_range(bio->bi_bdev->bd_dev, bio->bi_iter.bi_sector, bio->bi_iter.bi_sector + bio_size(bio) / 512);
     if (err) {
         if (err == -EEXIST) {
             pr_info("registry_lookup_range: bio [%llu, %llu) has been already snapped", bio->bi_iter.bi_sector,  bio->bi_iter.bi_sector + DIV_ROUND_UP(bio_size(bio), 512));
@@ -95,7 +95,7 @@ static bool skip_handler(struct bio *bio) {
     }
 
    if (bio->bi_bdev->bd_dev == MKDEV(7, 6)) {
-        pr_info("submit_bio: [%llu, %llu)", bio->bi_iter.bi_sector,  bio->bi_iter.bi_sector + DIV_ROUND_UP(bio_size(bio), 512));
+        pr_info("submit_bio: [%llu, %llu)", bio->bi_iter.bi_sector,  bio->bi_iter.bi_sector + bio_size(bio) / 512);
     }
 
     return false;
