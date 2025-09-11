@@ -15,12 +15,15 @@ void itree_destroy(struct session *s) {
 
 int itree_add(struct session *s, struct b_range *range) {
     if (itree_subset_of(s, range->start, range->end_excl)) {
+        pr_info("itree_add([%lu, %lu)): range already present", range->start, range->end_excl);
         return -EEXIST;
     }
-    return mtree_store_range(&s->tree, range->start, range->end_excl, range, GFP_NOWAIT);
+    int err = mtree_store_range(&s->tree, range->start, range->end_excl, range, GFP_NOWAIT);
+    pr_info("itree_add([%lu, %lu)): %d", range->start, range->end_excl, err);
+    return err;
 }
 
-static void update_span(struct b_range *q, struct b_range *r) {
+static unsigned long update_span(struct b_range *q, struct b_range *r) {
     if (q->start >= r->start && q->end_excl <= r->end_excl) {
         // q:     [-----)
         // r:  [------------)
@@ -36,6 +39,7 @@ static void update_span(struct b_range *q, struct b_range *r) {
         // r:      [----------------)
         q->end_excl = r->start;
     }
+    return q->end_excl - q->start;
 }
 
 /**
@@ -48,7 +52,9 @@ bool itree_subset_of(struct session *s, unsigned long start, unsigned long end_e
     struct b_range *r;
     unsigned long index = start;
     mt_for_each(&s->tree, r, index, end_excl) {
-        update_span(&query, r);
+        if (!update_span(&query, r)) {
+            break;
+        }
     }
     rcu_read_unlock();
     return query.start == query.end_excl;

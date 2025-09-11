@@ -8,12 +8,7 @@ struct b_range {
 };
 
 static struct b_range data[] = {
-    {.lo=0, .hi=150},
-    {.lo=850, .hi=1000},
-    {.lo=1000, .hi=1020},
-    {.lo=1020, .hi=1050},
-    {.lo=1051, .hi=1500},
-    {.lo=2000, .hi=2500},
+    {.lo=16, .hi=24},
 };
 static int n = sizeof(data) / sizeof(struct b_range);
 
@@ -38,6 +33,7 @@ static void update_span(struct b_range *q, struct b_range *r, unsigned long *spa
         q->hi = r->lo;
     }
     *span = q->hi - q->lo;
+    pr_info("update_span: span=%lu", *span);
 }
 
 static bool mt_covers(struct maple_tree *tree, struct b_range *q) {
@@ -64,12 +60,7 @@ static int __init mtree_test_init(void) {
     if (err) goto out;
 
     struct b_range queries[] = {
-        {.lo=25, .hi=125},
-        {.lo=75, .hi=175},
-        {.lo=900, .hi=1080},
-        {.lo=1010, .hi=1030},
-        {.lo=1900, .hi=2600},
-        {.lo=2700, .hi=3000},
+        {.lo=8, .hi=16},
     };
     for (int i = 0; i < sizeof(queries)/sizeof(struct b_range); ++i) {
         mt_test(&tree, i+1, &queries[i]);

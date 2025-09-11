@@ -595,6 +595,8 @@ int registry_add_range(dev_t dev, struct timespec64 *created_on, struct b_range 
     err = itree_add(s, range);
 out:
     rcu_read_unlock();
+    if (!err) pr_info("added range (%lu, %lu)", range->start, range->end_excl);
+    if (err == -EEXIST) pr_info("cannot add range (%lu, %lu), it already exists", range->start, range->end_excl);
     return err;
 }
 
