@@ -15,11 +15,9 @@ void itree_destroy(struct session *s) {
 
 int itree_add(struct session *s, struct b_range *range) {
     if (itree_subset_of(s, range->start, range->end_excl)) {
-        pr_info("itree_add([%lu, %lu)): range already present", range->start, range->end_excl);
         return -EEXIST;
     }
     int err = mtree_store_range(&s->tree, range->start, range->end_excl, range, GFP_NOWAIT);
-    pr_info("itree_add([%lu, %lu)): %d", range->start, range->end_excl, err);
     return err;
 }
 
