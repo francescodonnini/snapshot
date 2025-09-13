@@ -131,7 +131,6 @@ int snap_map_add_range(dev_t dev, struct timespec64 *created_on, sector_t lo, se
  * Se nessuna bitmap è associata a un numero di dispositivo, allora si deve creare.
  */
 int snap_map_add_sector(dev_t dev, struct timespec64 *created_on, sector_t sector, bool *added) {
-    pr_info("add_sector(%d:%d, %llu)", MAJOR(dev), MINOR(dev), sector);
     int err;
     int rdx = srcu_read_lock(&srcu);
     struct snap_map *map = snap_map_lookup_srcu(dev, created_on);

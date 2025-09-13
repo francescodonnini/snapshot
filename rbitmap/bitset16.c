@@ -21,9 +21,10 @@ bool bitset16_add(struct bitset16 *b, uint16_t x) {
         return false;
     }
     bitmap_set(b->bitmap, x, 1);
+    b->size++;
     return true;
 }
 
-int bitset16_contains(const struct bitset16 *b, uint16_t x) {
+bool bitset16_contains(const struct bitset16 *b, uint16_t x) {
     return test_bit(x, b->bitmap);
 }

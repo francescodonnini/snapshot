@@ -14,6 +14,6 @@ bool bitset16_add(struct bitset16 *b, uint16_t x);
 
 void bitset16_add_range(struct bitset16 *b, uint16_t lo, uint16_t hi_excl, unsigned long *added);
 
-int bitset16_contains(const struct bitset16 *b, uint16_t x);
+bool bitset16_contains(const struct bitset16 *b, uint16_t x);
 
 #endif

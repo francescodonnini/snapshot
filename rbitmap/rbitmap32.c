@@ -142,16 +142,10 @@ int rbitmap32_add(struct rbitmap32 *r, uint32_t x, bool *added) {
         case ARRAY_CONTAINER:
             // ARRAY_CONTAINER should hold maximum ARRAY_CONTAINER_THRESHOLD items, past that threshold it is
             // necessary to convert the array to a bitset
-            if (rcontainer_length(c) + 1 >= ARRAY_CONTAINER_THRESHOLD) {
-                err = array16_to_bitset(c);
-                if (err) {
-                    goto unlock;
-                }
-                *added = bitset16_add(c->bitset, lower_16_bits(x));
-                err = 0;
-            } else {
-                err = array16_add(c->array, lower_16_bits(x), added);
-            }
+            err = array16_add(c->array, lower_16_bits(x), added);
+            if (!err && rcontainer_length(c) >= ARRAY_CONTAINER_THRESHOLD) {
+                array16_to_bitset(c);
+            } 
             break;
         case BITSET_CONTAINER:
             *added = bitset16_add(c->bitset, lower_16_bits(x));
