@@ -92,7 +92,8 @@
         "snap_map.h": "c",
         "math64.h": "c",
         "time.h": "c",
-        "time_types.h": "c"
+        "time_types.h": "c",
+        "b_range.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
     "makefile.configureOnOpen": true,

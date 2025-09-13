@@ -31,6 +31,7 @@ out:
 }
 
 static int update_session(const char *dev_name, struct block_device *bdev, updt_ssn_t updt_fn) {
+    pr_info("update_session: block_size = %u", bdev_logical_block_size(bdev));
     int err;
     if (is_loop_device(bdev)) {
         err = registry_update_loop_device(bdev, updt_fn);

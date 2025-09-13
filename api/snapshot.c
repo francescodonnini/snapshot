@@ -7,6 +7,7 @@
 #include "snapshot.h"
 #include <linux/bio.h>
 #include <linux/bitmap.h>
+#include <linux/blkdev.h>
 #include <linux/bvec.h>
 #include <linux/dcache.h>
 #include <linux/fs.h>
@@ -140,19 +141,19 @@ void snapshot_cleanup(void) {
     snap_map_cleanup();
 }
 
-static void file_write(const char *path, struct page_iter *it, unsigned long lo, unsigned long nbytes) {    
-    struct file *fp = filp_open(path, O_CREAT | O_WRONLY, 0644);
+static void file_write(const char *path, struct page_iter *it, unsigned long offset, unsigned long nbytes) {    
+    struct file *fp = filp_open(path, O_CREAT | O_EXCL | O_WRONLY, 0644);
     if (IS_ERR(fp)) {
         pr_err("cannot open file: %s, got error %ld", path, PTR_ERR(fp));
         return;
     }
-    if (lo + nbytes > it->offset + it->len) {
-        pr_err("write to %s failed: lo=%lu + #B=%lu > off=%u + len=%u", path, lo, nbytes, it->offset, it->len);
+    if (offset + nbytes > it->offset + it->len) {
+        pr_err("write to %s failed: lo=%lu + #B=%lu > off=%u + len=%u", path, offset, nbytes, it->offset, it->len);
         goto out;
     }
     void *va = page_address(it->page);
     loff_t off = 0;
-    ssize_t n = kernel_write(fp, va + it->offset + lo, nbytes, &off);
+    ssize_t n = kernel_write(fp, va + offset, nbytes, &off);
     if (n != nbytes) {
         pr_err("kernel_write failed to write whole page at %s", path);
     }
@@ -211,13 +212,6 @@ out_unlock_put:
     return err;
 }
 
-static char *bitmap_fmt(char *buf, size_t n, unsigned long *map, size_t nbits) {
-    for (size_t i = 0; i < min_t(size_t, n, nbits); ++i) {
-        buf[i] = test_bit(i, map) ? '1' : '0';
-    }
-    return buf;
-}
-
 static void save_block(struct work_struct *work) {
     struct block_work *w = container_of(work, struct block_work, work);
     size_t path_len = strlen(ROOT_DIR) + strlen(w->session_id) + MAX_NAME_LEN + 3;
@@ -229,29 +223,24 @@ static void save_block(struct work_struct *work) {
         pr_err("out of memory");
         goto out;
     }
-    sector_t sectors_num = w->data.len / 512;
-    sector_t last_excl = w->sector + sectors_num;
-    struct small_bitmap bitmap;
-    unsigned long *added = small_bitmap_zeros(&bitmap,  sectors_num);
-    if (!added) {
-        pr_err("out of memory");
-        goto free_path;
+    unsigned long offset = w->data.offset;
+    sector_t sectors_num = DIV_ROUND_UP(w->data.len, 512);
+    for (sector_t sector = w->sector; sector < w->sector + sectors_num; ++sector) {
+        bool added;
+        int err = snap_map_add_sector(w->device, &w->session_created_on, sector, &added);
+        if (err) {
+            pr_err("cannot add sector %llu to bitmap, got error %d", sector, err);
+            goto free_data;
+        }
+        if (added) {
+            pr_info("save_block: [%llu, %llu)", sector, sector + 1);
+            sprintf(path, "%s/%s/%llu", ROOT_DIR, w->session_id, sector);
+            file_write(path, &w->data, offset, 512);
+        }
+        offset += 512;
     }
-    int err = snap_map_add_range(w->device, &w->session_created_on, w->sector, last_excl, added);
-    if (err) {
-        pr_err("cannot add range [%llu, %llu), got error %d", w->sector, last_excl, err);
-        goto free_path;
-    }
-    char map_buf[256] = {0};
-    pr_info("save_block: snap_map_add_range(%llu, %llu) -> %s", w->sector, last_excl, bitmap_fmt(map_buf, 255, added, sectors_num));
-    unsigned long lo = 0, hi_excl = 0;
-    while (small_bitmap_next_set_region(&bitmap, &lo, &hi_excl)) {
-        pr_info("save_block: %llu [%lu, %lu)", w->sector + lo, lo * 512, (hi_excl - lo) * 512);
-        sprintf(path, "%s/%s/%llu", ROOT_DIR, w->session_id, w->sector + lo);
-        file_write(path, &w->data, lo * 512, (hi_excl - lo) * 512);
-    }
-    small_bitmap_free(&bitmap);
-free_path:
+free_data:
+    __free_pages(w->data.page, get_order(w->data.len));
     kfree(path);
 out:
     kfree(w);
@@ -293,7 +282,7 @@ static void snapshot_save(struct work_struct *work) {
 
     // We completed successfully the read of the region to snapshot, so we
     // can add the whole range to the tree.
-    struct b_range *range = b_range_alloc(p_data->sector, p_data->sector + p_data->bytes / 512);
+    struct b_range *range = b_range_alloc(p_data->sector, p_data->sector + DIV_ROUND_UP(p_data->bytes, 512));
     if (!range) {
         pr_err("out of memory");
         goto free_session;
@@ -301,10 +290,9 @@ static void snapshot_save(struct work_struct *work) {
     int err = registry_add_range(p_data->dev, &session_created_on, range);
     if (err) {
         if (err == -EEXIST) {
-            pr_info("skipping bio: %llu, %llu", p_data->sector, p_data->sector + p_data->bytes / 512);
-        } else {
-            kfree(range);
+            pr_info("skipping bio: %llu, %llu", p_data->sector, p_data->sector + DIV_ROUND_UP(p_data->bytes, 512));
         }
+        kfree(range);
     }
 
     err = mkdir_session(session);
@@ -314,6 +302,7 @@ static void snapshot_save(struct work_struct *work) {
 
     err = snap_map_create(p_data->dev, &session_created_on);
     if (err && err != -EEXIST) {
+        pr_err("cannot create bitmap, got error %d", err);
         goto free_session;
     }
 
@@ -333,8 +322,12 @@ static void snapshot_save(struct work_struct *work) {
         memcpy(&b->data, pos, sizeof(*pos));
         INIT_WORK(&b->work, save_block);
         queue_work(save_blocks_wq, &b->work);
-        sector += (pos->len / 512);
+        sector += DIV_ROUND_UP(pos->len, 512);
     }
+    kfree(session);
+    kfree(w);
+    return;
+
 free_session:
     kfree(session);
 out:
