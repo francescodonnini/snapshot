@@ -77,6 +77,7 @@ static int array16_to_bitset(struct rcontainer *c) {
         for (int32_t i = 0; i < c->array->size; ++i) {
             bitmap_set(bitset->bitmap, c->array->buffer[i], 1);
         }
+        bitset->size = c->array->size;
         array16_destroy(c->array);
     }
     c->c_type = BITSET_CONTAINER;
