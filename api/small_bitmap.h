@@ -30,14 +30,11 @@ static inline void small_bitmap_free(struct small_bitmap *b) {
 }
 
 static inline bool small_bitmap_next_set_region(struct small_bitmap *map, unsigned long *lo, unsigned long *hi) {
-    unsigned long _lo, _hi;
-    _lo = find_next_bit(map->map, map->nbits, *hi);
-    if (_lo >= map->nbits) {
+    *lo = find_next_bit(map->map, map->nbits, *lo);
+    if (*lo >= map->nbits) {
         return false;
     }
-    _hi = min_t(long, find_next_zero_bit(map->map, map->nbits, _lo), map->nbits);
-    *lo = _lo;
-    *hi = _hi;
+    *hi = min_t(long, find_next_zero_bit(map->map, map->nbits, *lo), map->nbits);
     return true;
 }
 

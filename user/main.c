@@ -56,6 +56,8 @@ static error_t parse_opt(int opt, char *arg, struct argp_state *state) {
                     fields->command = IOCTL_DEACTIVATE_SNAPSHOT;
                 } else if (!strcmp(arg, "ls")) {
                     fields->command = LS_SNAPSHOT;
+                } else if (!strcmp(arg, "restore")) {
+                    fields->command = RESTORE;
                 } else {
                     argp_error(state, "expected one of activate, deactivate or ls but got %s", arg);
                 }
@@ -65,7 +67,7 @@ static error_t parse_opt(int opt, char *arg, struct argp_state *state) {
             break;
         case ARGP_KEY_END:
             if (!fields->command) {
-                argp_error(state, "You must specify a command (activate|deactivate|ls)");
+                argp_error(state, "You must specify a command (activate|deactivate|ls|restore)");
             } else if (fields->command == IOCTL_ACTIVATE_SNAPSHOT
                        || fields->command == IOCTL_DEACTIVATE_SNAPSHOT) {
                 if (!fields->path || !fields->password) {

@@ -47,7 +47,6 @@ static inline unsigned long bio_size(struct bio *bio) {
 static inline bool bio_is_marked(struct bio *bio) {
     if (bio_flagged(bio, 15)) {
         bio_clear_flag(bio, 15);
-        pr_info("submit_bio: MARKED [%llu, %llu)", bio->bi_iter.bi_sector,  bio->bi_iter.bi_sector + DIV_ROUND_UP(bio_size(bio), bdev_logical_block_size(bio->bi_bdev)));
         return true;
     }
     bio_set_flag(bio, 15);
@@ -70,18 +69,6 @@ static inline bool empty_write(struct bio *bio) {
  *    results.
  */
 static bool skip_handler(struct bio *bio) {
-    unsigned int block_size = bdev_logical_block_size(bio->bi_bdev);
-    if (bio->bi_bdev->bd_dev == MKDEV(7, 0)) {
-        switch (bio->bi_opf) {
-            case REQ_OP_DISCARD:
-            case REQ_OP_WRITE_ZEROES:
-            case REQ_OP_SECURE_ERASE:
-            case REQ_OP_ZONE_APPEND:
-            case REQ_OP_ZONE_CLOSE:
-                pr_info("submit_bio: W/OTHER: [%llu, %llu)", bio->bi_iter.bi_sector, bio->bi_iter.bi_sector + DIV_ROUND_UP(bio_size(bio), 512));
-                break;
-        }
-    }
     if (!bio
         || !op_is_write(bio->bi_opf)
         || empty_write(bio)
@@ -92,26 +79,13 @@ static bool skip_handler(struct bio *bio) {
         pr_err("cannot read device number from bio struct");
         return true;
     }
-
-    if (bio->bi_bdev->bd_dev == MKDEV(7, 0)) {
-        pr_info("submit_bio: WR [%llu, %llu)", bio->bi_iter.bi_sector,  bio->bi_iter.bi_sector + DIV_ROUND_UP(bio_size(bio), 512));
-    }
-
     int err = registry_lookup_range(bio->bi_bdev->bd_dev, bio->bi_iter.bi_sector, bio->bi_iter.bi_sector + DIV_ROUND_UP(bio_size(bio), 512));
     if (err) {
-        if (err == -EEXIST) {
-            pr_info("registry_lookup_range: bio [%llu, %llu) has been already snapped", bio->bi_iter.bi_sector,  bio->bi_iter.bi_sector + DIV_ROUND_UP(bio_size(bio), 512));
-        }
         if (err != -ENOSSN && err != -EEXIST) {
             pr_err("registry_lookup_range: completed with error %d", err);
         }
         return true;
     }
-
-   if (bio->bi_bdev->bd_dev == MKDEV(7, 0)) {
-        pr_info("submit_bio: [%llu, %llu)", bio->bi_iter.bi_sector,  bio->bi_iter.bi_sector + DIV_ROUND_UP(bio_size(bio), 512));
-    }
-
     return false;
 }
 

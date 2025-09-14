@@ -212,33 +212,57 @@ out_unlock_put:
     return err;
 }
 
+static char *bitmap_fmt(char *out, unsigned long *bitmap, unsigned long nbits) {
+    char *p = out;
+    for (size_t i = 0; i < nbits; ++i) {
+        sprintf(p++, "%d", test_bit(i, bitmap));
+    }
+    return out;
+}
+
 static void save_block(struct work_struct *work) {
     struct block_work *w = container_of(work, struct block_work, work);
     size_t path_len = strlen(ROOT_DIR) + strlen(w->session_id) + MAX_NAME_LEN + 3;
     if (path_len > PATH_MAX) {
         goto out;
     }
+
     char *path = kzalloc(path_len, GFP_KERNEL);
     if (!path) {
         pr_err("out of memory");
         goto out;
     }
-    unsigned long offset = w->data.offset;
-    sector_t sectors_num = DIV_ROUND_UP(w->data.len, 512);
-    for (sector_t sector = w->sector; sector < w->sector + sectors_num; ++sector) {
-        bool added;
-        int err = snap_map_add_sector(w->device, &w->session_created_on, sector, &added);
-        if (err) {
-            pr_err("cannot add sector %llu to bitmap, got error %d", sector, err);
-            goto free_data;
-        }
-        if (added) {
-            pr_info("save_block: [%llu, %llu)", sector, sector + 1);
-            sprintf(path, "%s/%s/%llu", ROOT_DIR, w->session_id, sector);
-            file_write(path, &w->data, offset, 512);
-        }
-        offset += 512;
+    
+    unsigned long sectors_num = DIV_ROUND_UP(w->data.len, 512);
+    struct small_bitmap map;
+    unsigned long *added = small_bitmap_zeros(&map, sectors_num);
+    if (!added) {
+        goto free_data;
     }
+    
+    char *str = kzalloc(sectors_num + 1, GFP_KERNEL);
+    if (!str) {
+        goto free_map;
+    }
+    
+    int err = snap_map_add_range(w->device, &w->session_created_on, w->sector, w->sector + sectors_num, added);
+    if (err) {
+        pr_err("cannot add range [%llu, %llu) to bitmap, got error %d", w->sector, w->sector + sectors_num, err);
+        goto free_data;
+    } else {
+        pr_info("add_range[%llu, %llu): %s", w->sector, w->sector + sectors_num, bitmap_fmt(str, added, sectors_num));
+    }
+    
+    unsigned long lo = 0, hi;
+    while (small_bitmap_next_set_region(&map, &lo, &hi)) {
+        sprintf(path, "%s/%s/%llu", ROOT_DIR, w->session_id, w->sector + lo);
+        file_write(path, &w->data, w->data.offset + lo, (hi - lo) * 512);
+        lo = hi;
+    }
+    
+    kfree(str);
+free_map:
+    small_bitmap_free(&map);
 free_data:
     __free_pages(w->data.page, get_order(w->data.len));
     kfree(path);
@@ -289,9 +313,6 @@ static void snapshot_save(struct work_struct *work) {
     }
     int err = registry_add_range(p_data->dev, &session_created_on, range);
     if (err) {
-        if (err == -EEXIST) {
-            pr_info("skipping bio: %llu, %llu", p_data->sector, p_data->sector + DIV_ROUND_UP(p_data->bytes, 512));
-        }
         kfree(range);
     }
 
