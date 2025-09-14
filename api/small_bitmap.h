@@ -34,8 +34,7 @@ static inline bool small_bitmap_next_set_region(struct small_bitmap *map, unsign
     if (*lo >= map->nbits) {
         return false;
     }
-    unsigned long tmp = find_next_zero_bit(map->map, map->nbits, *lo);
-    *hi = tmp == find_next_zero_bit(map->map, map->nbits, *lo)
+    *hi = find_next_zero_bit(map->map, map->nbits, *lo)
     return true;
 }
 
