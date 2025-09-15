@@ -245,7 +245,7 @@ int rbitmap32_add_range(struct rbitmap32 *r, uint32_t lo, uint32_t hi_excl, unsi
         uint16_t n = last - lower_16_bits(lo) + 1;
         struct rcontainer *c = rcontainer_get_or_create(r, lo, n);
         mutex_lock(&c->lock);
-        int err = rcontainer_add_range_unlocked(c, upper_16_bits(lo), last, added, idx);
+        int err = rcontainer_add_range_unlocked(c, lower_16_bits(lo), last, added, idx);
         mutex_unlock(&c->lock);
         if (err) {
             return err;
