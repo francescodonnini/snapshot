@@ -23,9 +23,7 @@ static inline bool rcontainer_null(const struct rcontainer *c) {
 }
 
 static inline void rcontainer_destroy(struct rcontainer *c) {
-    mutex_lock(&c->lock);
     if (rcontainer_null(c)) {
-        mutex_unlock(&c->lock);
         return;
     }
     switch (c->c_type) {
@@ -42,9 +40,6 @@ static inline void rcontainer_destroy(struct rcontainer *c) {
         default:
             pr_err("invalid container type %d", c->c_type);
     }
-    c->c_type = ARRAY_CONTAINER;
-    c->array = NULL;
-    mutex_unlock(&c->lock);
 }
 
 void rbitmap32_destroy(struct rbitmap32 *r) {
@@ -135,7 +130,7 @@ static inline int32_t container_index(uint32_t x) {
     return upper_16_bits(x);
 }
 
-static struct rcontainer* rcontainer_nth(struct rbitmap32 *r, uint32_t x) {
+static inline struct rcontainer* rcontainer_nth(struct rbitmap32 *r, uint32_t x) {
     return xa_load(&r->containers, container_index(x));
 }
 
@@ -212,7 +207,7 @@ static int rcontainer_add_range_unlocked(struct rcontainer *c, uint16_t lo, uint
 }
 
 /**
- * Retursn the first element that is not in the same container as x, or the maximum 32-bit integer
+ * Returns the first element that is not in the same container as x, or the maximum 32-bit integer
  * if x is in the last container
  */
 static inline uint32_t next_container_start(uint32_t x) {
