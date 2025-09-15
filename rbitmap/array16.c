@@ -140,7 +140,7 @@ static int array16_push_range(struct array16 *b, uint16_t lo, uint16_t hi, unsig
             return err;
         }
     }
-    bitmap_set(added, 0, idx + hi - lo + 1);
+    bitmap_set(added, idx, n);
     return 0;
 }
 
@@ -168,14 +168,16 @@ int array16_add_range(struct array16 *b, uint16_t lo, uint16_t hi, unsigned long
             ++i;
         } else {
             // if x < b->buffer[i] then x cannot be in the array
-            bitmap_set(added, idx + x - lo, 1);
+            bitmap_set(added, idx, 1);
             ++x;
         }
+        ++idx;
     }
+    // x <= hi if the array contains an element greater than hi or if i reached the end of the array
+    // in both cases all the remaining elements in the range [x, hi] are not in the array
     if (x <= hi) {
-        bitmap_set(added, x - lo, hi - x + 1);
+        bitmap_set(added, idx, hi - x + 1);
     }
-    // n is the number of items to add to the bitmap
     int32_t remaining = hi - lo - common + 1;
     if (remaining > 0) {
         if (b->size + remaining >= b->capacity) {
