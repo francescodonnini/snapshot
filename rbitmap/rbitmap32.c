@@ -1,19 +1,13 @@
 #include "rbitmap32.h"
 #include <linux/printk.h>
 #include <linux/slab.h>
+#include <linux/srcu.h>
 #include <linux/string.h>
 #include <linux/wordpart.h>
 #define ARRAY_CONTAINER_THRESHOLD (4096)
-#define rcontainer_for_each(pos, bm)\
-        for (pos = (bm)->containers; pos < &(bm)->containers[16]; ++pos)\
 
 int rbitmap32_init(struct rbitmap32 *r) {
-    struct rcontainer *pos;
-    rcontainer_for_each(pos, r) {
-        pos->c_type = ARRAY_CONTAINER;
-        pos->array = NULL;
-        mutex_init(&pos->lock);
-    }
+    xa_init(&r->containers);
     return 0;
 }
 
@@ -54,10 +48,12 @@ static inline void rcontainer_destroy(struct rcontainer *c) {
 }
 
 void rbitmap32_destroy(struct rbitmap32 *r) {
-    struct rcontainer *pos;
-    rcontainer_for_each(pos, r) {
-        rcontainer_destroy(pos);
+    struct rcontainer *c;
+    unsigned long idx;
+    xa_for_each(&r->containers, idx, c) {
+        rcontainer_destroy(c);
     }
+    xa_destroy(&r->containers);
 }
 
 static struct bitset16* bitset16_alloc(void) {
@@ -85,8 +81,8 @@ static int array16_to_bitset(struct rcontainer *c) {
     return 0;
 }
 
-static int rcontainer_alloc_array16(struct rcontainer *c) {
-    c->array = array16_alloc(DEFAULT_INITIAL_CAPACITY);
+static int rcontainer_alloc_array16(struct rcontainer *c, uint32_t n) {
+    c->array = array16_alloc(n);
     if (!c->array) {
         return -ENOMEM;
     }
@@ -115,12 +111,53 @@ static int32_t rcontainer_length(const struct rcontainer *c) {
     }
 }
 
+static struct rcontainer *rcontainer_alloc(uint32_t n) {
+    struct rcontainer *c = kzalloc(sizeof(*c), GFP_KERNEL);
+    if (!c) {
+        return NULL;
+    }
+    mutex_init(&c->lock);
+    int err;
+    if (n > ARRAY_CONTAINER_THRESHOLD) {
+        err = rcontainer_alloc_bitset16(c);
+    } else {
+        n = n > 0 ? n : DEFAULT_INITIAL_CAPACITY;
+        err = rcontainer_alloc_array16(c, n);
+    }
+    if (err) {
+        kfree(c);
+        return NULL;
+    }
+    return c;
+}
+
 static inline int32_t container_index(uint32_t x) {
-    return upper_16_bits(x) / 4096;
+    return upper_16_bits(x);
 }
 
 static struct rcontainer* rcontainer_nth(struct rbitmap32 *r, uint32_t x) {
-    return &r->containers[container_index(x)];
+    return xa_load(&r->containers, container_index(x));
+}
+
+static struct rcontainer* rcontainer_get_or_create(struct rbitmap32 *r, uint32_t x, uint32_t n) {
+    struct rcontainer *c = rcontainer_nth(r, x);
+    if (c) {
+        return c;
+    }
+    c = rcontainer_alloc(n);
+    if (!c) {
+        return ERR_PTR(-ENOMEM);
+    }
+    int err = xa_insert(&r->containers, container_index(x), c, GFP_KERNEL);
+    if (err) {
+        kfree(c);
+        if (err != -EBUSY) {
+            return ERR_PTR(err);
+        } else {
+            return rcontainer_nth(r, x);
+        }
+    }
+    return c;
 }
 
 /**
@@ -129,16 +166,12 @@ static struct rcontainer* rcontainer_nth(struct rbitmap32 *r, uint32_t x) {
  * if the insertion fails.
  */
 int rbitmap32_add(struct rbitmap32 *r, uint32_t x, bool *added) {
-    int err;
-    struct rcontainer *c = rcontainer_nth(r, x);
-    mutex_lock(&c->lock);
-    // The default initial container is ARRAY_CONTAINER
-    if (rcontainer_null(c)) {
-        err = rcontainer_alloc_array16(c);
-        if (err) {
-            goto unlock;
-        }
+    struct rcontainer *c = rcontainer_get_or_create(r, x, 0);
+    if (IS_ERR(c)) {
+        return PTR_ERR(c);
     }
+    mutex_lock(&c->lock);
+    int err;
     switch (c->c_type) {
         case ARRAY_CONTAINER:
             // ARRAY_CONTAINER should hold maximum ARRAY_CONTAINER_THRESHOLD items, past that threshold it is
@@ -156,31 +189,21 @@ int rbitmap32_add(struct rbitmap32 *r, uint32_t x, bool *added) {
             pr_err("invalid container type %d", c->c_type);
             err = -1;
     }
-unlock:
     mutex_unlock(&c->lock);
     return err;
 }
 
-static int rcontainer_add_range_unlocked(struct rcontainer *c, uint16_t lo, uint16_t hi_excl, unsigned long *added) {
-    if (rcontainer_null(c)) {
-        int err;
-        if (hi_excl - lo > ARRAY_CONTAINER_THRESHOLD) {
-            err = rcontainer_alloc_array16(c);
-        } else {
-            err = rcontainer_alloc_bitset16(c);
-        }
-        if (err) return err;
-    }
+static int rcontainer_add_range_unlocked(struct rcontainer *c, uint16_t lo, uint16_t hi, unsigned long *added, unsigned long idx) {
     int err;
     switch (c->c_type) {
         case ARRAY_CONTAINER:
-            err = array16_add_range(c->array, lo, hi_excl, added);
+            err = array16_add_range(c->array, lo, hi, added, idx);
             if (!err && rcontainer_length(c) >= ARRAY_CONTAINER_THRESHOLD) {
                 err = array16_to_bitset(c);
             }
             return err; 
         case BITSET_CONTAINER:
-            bitset16_add_range(c->bitset, lo, hi_excl, added);
+            bitset16_add_range(c->bitset, lo, hi, added, idx);
             return 0;
         default:
             pr_err("invalid container type %d", c->c_type);
@@ -189,57 +212,46 @@ static int rcontainer_add_range_unlocked(struct rcontainer *c, uint16_t lo, uint
 }
 
 /**
- * container_last produces the last integer that the i-th contaner can hold, the upper 16 bits are
- * equal to i * 4096, while the lower 16 bits are all ones.
+ * Retursn the first element that is not in the same container as x, or the maximum 32-bit integer
+ * if x is in the last container
  */
-static inline uint32_t container_last(int i) {
-    return ((i << 9) << 16) | 0xffff;
+static inline uint32_t next_container_start(uint32_t x) {
+    uint32_t next = x | 0xffff;
+    if (upper_16_bits(x) < 0xffff) {
+        next++;
+    }
+    return next;
+}
+
+/**
+ * Returns the last item that belongs to the same container as x or hi_excl - 1 if the range
+ * [x, hi_excl) does not span multiple containers
+ */
+static inline uint16_t last_item(uint32_t x, uint32_t hi_excl) {
+    // [x, hi_excl) spans multiple containers
+    if (upper_16_bits(x) < upper_16_bits(hi_excl - 1)) {
+        return 0xffff;
+    } else {
+        return lower_16_bits(hi_excl - 1);
+    }
 }
 
 int rbitmap32_add_range(struct rbitmap32 *r, uint32_t lo, uint32_t hi_excl, unsigned long *added) {
-    // the items in the range [lo, hi_excl] can reside in different containers, it is necessary
-    // to determine in order the subranges associated to container 0, 1, ..., 15
+    unsigned long idx = 0;
+    // the items in the range [lo, hi_excl) can reside in different containers, it is necessary
+    // to determine in order the subranges associated to container 0, 1, 2, ...
     while (lo < hi_excl) {
-        int idx = container_index(lo);
-        uint32_t last_excl;
-        if (idx < 15) {
-            // one past the last element of container i
-            last_excl = min_t(uint32_t, container_last(idx) + 1, hi_excl);
-        } else {
-            last_excl = hi_excl;
-        }
-        struct rcontainer *c = rcontainer_nth(r, lo);
+        uint16_t last = last_item(lo, hi_excl);
+        uint16_t n = last - lower_16_bits(lo) + 1;
+        struct rcontainer *c = rcontainer_get_or_create(r, lo, n);
         mutex_lock(&c->lock);
-        int err = rcontainer_add_range_unlocked(c, lower_16_bits(lo), lower_16_bits(last_excl), added);
+        int err = rcontainer_add_range_unlocked(c, upper_16_bits(lo), last, added, idx);
         mutex_unlock(&c->lock);
         if (err) {
             return err;
         }
-        lo = last_excl;
+        idx += n;
+        lo = min_t(uint32_t, next_container_start(lo), hi_excl);
     }
     return 0;
-}
-
-bool rbitmap32_contains(struct rbitmap32 *r, uint32_t x) {
-    struct rcontainer *c = rcontainer_nth(r, x);
-    mutex_lock(&c->lock);
-    if (rcontainer_null(c)) {
-        mutex_unlock(&c->lock);
-        return false;
-    }
-    bool bret;
-    switch (c->c_type) {
-        case ARRAY_CONTAINER:
-            bret = array16_contains(c->array, lower_16_bits(x));
-            break;
-        case BITSET_CONTAINER:
-            bret = bitset16_contains(c->bitset, lower_16_bits(x));
-            break;
-        default:
-            pr_err("invalid container type %d", c->c_type);
-            bret = false;
-            break;
-    }
-    mutex_unlock(&c->lock);
-    return bret;
 }

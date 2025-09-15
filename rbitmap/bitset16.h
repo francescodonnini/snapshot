@@ -12,8 +12,6 @@ void bitset_destroy(struct bitset16 *b);
 
 bool bitset16_add(struct bitset16 *b, uint16_t x);
 
-void bitset16_add_range(struct bitset16 *b, uint16_t lo, uint16_t hi_excl, unsigned long *added);
-
-bool bitset16_contains(const struct bitset16 *b, uint16_t x);
+void bitset16_add_range(struct bitset16 *b, uint16_t lo, uint16_t hi, unsigned long *added, unsigned long idx);
 
 #endif

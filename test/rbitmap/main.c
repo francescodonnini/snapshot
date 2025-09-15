@@ -44,11 +44,6 @@ static int __init rbitmap32_test_init(void) {
         }
         if (added) ++n1;
     }
-    for (size_t i = 0; i < n; ++i) {
-        if (!rbitmap32_contains(&map, data[i])) {
-            pr_err("test failed: %u should be in the bitmap!", data[i]);
-        }
-    }
     size_t bytes = 0;
     size_t n2 = 0;
     for (size_t i = 0; i < 16; ++i) {

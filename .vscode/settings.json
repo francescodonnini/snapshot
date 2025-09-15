@@ -93,7 +93,8 @@
         "math64.h": "c",
         "time.h": "c",
         "time_types.h": "c",
-        "b_range.h": "c"
+        "b_range.h": "c",
+        "xarray.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
     "makefile.configureOnOpen": true,
