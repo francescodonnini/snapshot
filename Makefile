@@ -16,10 +16,7 @@ snapshot-objs := 	api/activate_snapshot.o \
 					rbitmap/bitset16.o \
 					rbitmap/rbitmap32.o \
 					probes/handlers.o \
-					probes/ext4_fill_super.o \
-					probes/get_tree_bdev.o \
-					probes/mount_bdev.o \
-					probes/path_umount.o \
+					probes/fill_super.o \
 					probes/submit_bio.o \
 					probes/update_session.o \
 					main.o \

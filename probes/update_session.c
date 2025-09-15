@@ -30,15 +30,24 @@ out:
     return err;
 }
 
-static int update_session(const char *dev_name, struct block_device *bdev, updt_ssn_t updt_fn) {
+
+
+static int update_session(struct file *bd_file, updt_ssn_t updt_fn) {
+    struct block_device *bdev = I_BDEV(bd_file->f_inode);
     int err;
     if (is_loop_device(bdev)) {
         err = registry_update_loop_device(bdev, updt_fn);
     } else {
+        char *buf = kzalloc(PATH_MAX, GFP_ATOMIC);
+        if (!buf) {
+            return -ENOMEM;
+        }
+        char *dev_name = d_path(&bd_file->f_path, buf, PATH_MAX);
         err = updt_fn(dev_name, bdev->bd_dev);
+        kfree(buf);
     }
     if (err) {
-        pr_debug(pr_format("cannot update device %d:%d, got error %d"), MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev), err);
+        pr_err("cannot update device %d:%d, got error %d", MAJOR(bdev->bd_dev), MINOR(bdev->bd_dev), err);
     }
     return err;
 }
@@ -47,10 +56,10 @@ static int update_session(const char *dev_name, struct block_device *bdev, updt_
  * ext4_update_session create a session object associated to a block device named dev_name, it's called before the fill_super operation completes because some
  * filesystems like ext4 send bio requests before get_tree_bdev/mount_bdev completes. The session object is destroyed if the fill_super operation fails.
  */
-int ext4_update_session(const char *dev_name, struct block_device *bdev) {
-    return update_session(dev_name, bdev, registry_session_prealloc);
+int ext4_update_session(struct file *bd_file) {
+    return update_session(bd_file, registry_session_prealloc);
 }
 
-int singlefilefs_update_session(const char *dev_name, struct block_device *bdev) {
-    return update_session(dev_name, bdev, registry_session_get_or_create);
+int singlefilefs_update_session(struct file *bd_file) {
+    return update_session(bd_file, registry_session_prealloc);
 }

@@ -10,8 +10,6 @@ struct session {
     dev_t              dev;
     char              *id;
     struct timespec64  created_on;
-    bool               pending;
-    int                mntpoints;
     struct maple_tree  tree;
     struct rcu_head    rcu;
 };

@@ -312,17 +312,10 @@ int registry_session_prealloc(const char *dev_name, dev_t dev) {
     }
     bool free_old_session = false; // if true, then the old session should be scheduled for deferred deallocation
     struct session *current_ssn = current_node->session;
-    if (current_ssn) {
-        if (current_ssn->mntpoints > 0) { // current session is still active
-            pr_err("usage counter of session %s is greater than 0", current_ssn->id);
-            err = -1;
-            goto release_lock;
-        } else {
-            // the old session could be deallocated because a new device has been mounted
-            free_old_session = true;
-        }
+    if (current_ssn) {       
+        // the old session could be deallocated because a new device has been mounted
+        free_old_session = true;
     }
-    new_ssn->pending = true;
     new_node->session = new_ssn;
     new_node->dev_name = current_node->dev_name;
     new_node->dev_name_hash = current_node->dev_name_hash;
@@ -348,129 +341,6 @@ static void free_node_only_rcu(struct rcu_head *head) {
 }
 
 /**
- * registry_session_get updates a previously registered image/device with the associated device number, if a session has been already registered,
- * then it increments it usage counter.
- * @param dev_name - the path of the image associated with the device
- * @param dev      - the device number associated to the device
- * @returns 0 on success, <0 otherwise.
- * 
- * It's called in kretprobe context.
- */
-int registry_session_get(const char *dev_name, dev_t dev) {
-    int err = 0;
-    unsigned long flags;
-    spin_lock_irqsave(&write_lock, flags);
-    struct snapshot_metadata *node = registry_get_by(by_dev, &dev);
-    if (!node) {
-        pr_debug(pr_format("no device associated to device=%s,%d:%d"), dev_name, MAJOR(dev), MINOR(dev));
-        err = -EWRONGCRED;
-        goto release_lock; // no device
-    }
-    struct session *s = node->session;
-    if (s) {
-        if (s->mntpoints > 0) { // current session is still active
-            s->mntpoints++;
-        } else if (!s->mntpoints && s->pending) {
-            s->mntpoints = 1;
-            s->pending = false;
-        } else {
-            pr_err("trying to increment expired usage counter");
-        }
-    }
-release_lock:
-    spin_unlock_irqrestore(&write_lock, flags);
-    return err;
-}
-
-/**
- * registry_session_get updates a previously registered image/device with the associated device number, if a session has been already registered,
- * then it increments it usage counter.
- * @param dev_name - the path of the image associated with the device
- * @param dev      - the device number associated to the device
- * @returns 0 on success, <0 otherwise.
- * 
- * It's called in kretprobe context.
- */
-int registry_session_get_or_create(const char *dev_name, dev_t dev) {
-    struct snapshot_metadata *node = node_alloc_noname(GFP_ATOMIC);
-    if (!node) {
-        pr_err("out of memory");
-        return -ENOMEM;
-    }
-    struct session *session = session_create(dev);
-    if (!session) {
-        pr_debug(pr_format("out of memory"));
-        kfree(node);
-        return -ENOMEM;
-    }
-    
-    int err = 0;
-    unsigned long flags;
-    spin_lock_irqsave(&write_lock, flags);
-    struct snapshot_metadata *old = get_by_name(dev_name);
-    if (!old) {
-        pr_debug(pr_format("no device associated to device=%s,%d:%d"), dev_name, MAJOR(dev), MINOR(dev));
-        err = -EWRONGCRED;
-        goto release_lock; // no device
-    }
-
-    const int INC_USAGE = 0; // session object is updated in-place
-    // new session object is going to be published to the registry, a new node needs to be swapped
-    // with the old one. If an old session object is pointed by the old node, it needs to be freed.
-    // The old node needs to be freed anyway.
-    const int SSN_REPLC = 1; // old session needs to be freed
-    const int SSN_CREAT = 2; // only the old node needs to be freed
-    int action;
-    struct session *s = old->session;
-    if (s) {
-        if (s->mntpoints > 0) { // current session is still active
-            s->mntpoints++;
-            action = INC_USAGE; // no need to replace the old node with the new one!
-        } else {
-            // the old session could be deallocated because a new device has been mounted
-            action = SSN_REPLC;
-        }
-    } else {
-        action = SSN_CREAT;
-    }
-
-    if (action != INC_USAGE) {
-        session->mntpoints = 1;
-        node->session = session;
-        node->dev_name = old->dev_name;
-        node->dev_name_hash = old->dev_name_hash;
-        memcpy(node->password, old->password, SHA256_LEN);
-        list_replace_rcu(&old->list, &node->list);
-    }
-
-    spin_unlock_irqrestore(&write_lock, flags);
-
-    switch (action) {
-        case INC_USAGE:
-            kfree(session);
-            kfree(node);
-            break;
-        case SSN_REPLC:
-            call_rcu(&old->rcu, free_session_rcu);
-            break;
-        case SSN_CREAT:
-            call_rcu(&old->rcu, free_node_only_rcu);
-            break;
-        default:
-            WARN(1, "unrecognized action %d", action);
-            break;
-    }
-
-    return err;
-
-release_lock:
-    spin_unlock_irqrestore(&write_lock, flags);
-    kfree(node);
-    session_destroy(session);
-    return err;
-}
-
-/**
  * registry_put_session attempts to decrement the usage counter of a session associated
  * to device number dev. Once the counter drops to zero, the corresponding session isn't free
  * immediately but it can be replaced by a new session if an appropriate device is mounted in the system.
@@ -492,12 +362,6 @@ int registry_session_put(dev_t dev) {
         err = -ENOSSN;
         goto unlock;
     }
-    if (WARN(!s->mntpoints, "usage count for session %s is already 0", s->id)) {
-        err = -ENOSSN;
-        goto unlock;
-    }
-    s->mntpoints--;
-    pr_info("decremented usage counter of session %s, new value is %d", s->id, s->mntpoints);
 unlock:
     spin_unlock_irqrestore(&write_lock, flags);
     return 0;
@@ -563,10 +427,6 @@ void registry_session_destroy(dev_t dev) {
     new_node->dev_name = it->dev_name;
     new_node->dev_name_hash = it->dev_name_hash;
     memcpy(new_node->password, it->password, SHA256_LEN);
-    
-    struct session *s = it->session;
-    WARN(s->mntpoints != 1, "usage counter of session '%s' is %d, expected 1\n", s->id, s->mntpoints);
-    
     new_node->session = NULL;
 
     list_replace_rcu(&it->list, &new_node->list);
@@ -651,7 +511,7 @@ ssize_t registry_show_session(char *buf, size_t size) {
         }
         br += sprintf(&buf[br], "%s ", it->dev_name);
         struct session *s = it->session;
-        if (s && s->mntpoints > 0) {
+        if (s) {
             br += sprintf(&buf[br], "%s\n", s->id);
         } else {
             br += sprintf(&buf[br], "-\n");

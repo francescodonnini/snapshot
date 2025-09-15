@@ -25,10 +25,6 @@ int registry_delete(const char *dev_name, const char *password);
 
 int registry_session_prealloc(const char *dev_name, dev_t dev);
 
-int registry_session_get_or_create(const char *dev_name, dev_t dev);
-
-int registry_session_get(const char *dev_name, dev_t dev); 
-
 int registry_session_put(dev_t dev);
 
 void registry_session_destroy(dev_t dev);
