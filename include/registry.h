@@ -19,9 +19,9 @@ int registry_init(void);
 
 void registry_cleanup(void);
 
-int registry_insert(const char *dev_name, const char *password);
+int registry_insert(const char *dev_name);
 
-int registry_delete(const char *dev_name, const char *password);
+int registry_delete(const char *dev_name);
 
 int registry_session_prealloc(const char *dev_name, dev_t dev);
 

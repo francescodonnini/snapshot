@@ -1,5 +1,6 @@
 obj-m += snapshot.o
 snapshot-objs := 	api/activate_snapshot.o \
+					api/auth.o \
 					api/dbg_dump_bio.o \
 					api/deactivate_snapshot.o \
 					api/hash.o \

@@ -15,8 +15,6 @@
 #include <linux/time.h>
 #include <linux/uuid.h>
 
-#define SHA256_LEN (32)
-
 struct node_dev {
     struct timespec64 *time;
     dev_t              dev;
@@ -34,12 +32,10 @@ struct snapshot_metadata {
     // speed up searches by making string comparisons only on collisions or matches
     unsigned long     dev_name_hash; 
     char             *dev_name;
-    char              password[SHA256_LEN];
     struct session   *session;
     struct rcu_head   rcu;
 };
 
-LIST_HEAD(empty_list);
 LIST_HEAD(registry_db);
 DEFINE_SPINLOCK(write_lock);
 
@@ -56,12 +52,15 @@ int registry_init(void) {
  */
 void registry_cleanup(void) {
     unsigned long flags;
+    LIST_HEAD(list);
+
     spin_lock_irqsave(&write_lock, flags);
-    list_splice_init(&registry_db, &empty_list);
+    list_splice_init(&registry_db, &list);
     spin_unlock_irqrestore(&write_lock, flags);
+
     synchronize_rcu();
     struct snapshot_metadata *it, *tmp;
-    list_for_each_entry_safe(it, tmp, &empty_list, list) {
+    list_for_each_entry_safe(it, tmp, &list, list) {
         struct session *s = it->session;
         if (s) {
             session_destroy(s);
@@ -185,36 +184,23 @@ static inline struct snapshot_metadata *node_alloc(const char *name, gfp_t gfp) 
  * *  other errors if it was not possibile to compute the cryptographic hash function of password (see 'hash' and 'hash_alloc' for details)
  * *  a pointer to the newly allocated memory area otherwise.
  */
-static struct snapshot_metadata* mk_node(const char *dev_name, const char *password) {
-    int err;
+static struct snapshot_metadata* mk_node(const char *dev_name) {
     size_t n = strnlen(dev_name, PATH_MAX);
     if (n == PATH_MAX) {
-        err = -ETOOBIG;
-        goto no_node;
+        return ERR_PTR(-ETOOBIG);
     }
     struct snapshot_metadata *node = node_alloc(dev_name, GFP_KERNEL);
-    if (node == NULL) {
-        err = -ENOMEM;
-        goto no_node;
-    }
-    err = hash("sha256", password, strlen(password), node->password, SHA256_LEN);
-    if (err) {
-        goto no_hash;
+    if (!node) {
+        return ERR_PTR(-ENOMEM);
     }
     return node;
-
-no_hash:
-    kfree(node->dev_name);
-    kfree(node);
-no_node:
-    return ERR_PTR(err);
 }
 
 /**
  * registry_insert tries to register a device/image file. It returns 0 on success, <0 otherwise.
  */
-int registry_insert(const char *dev_name, const char *password) {
-    struct snapshot_metadata *node = mk_node(dev_name, password);
+int registry_insert(const char *dev_name) {
+    struct snapshot_metadata *node = mk_node(dev_name);
     if (IS_ERR(node)) {
         return PTR_ERR(node);
     }
@@ -255,23 +241,19 @@ static void registry_delete_rcu(struct rcu_head *head) {
  * @param password the password protecting the snapshot
  * @return -EWRONGCRED if the password or the device name are wrong, 0 otherwise 
  */
-int registry_delete(const char *dev_name, const char *password) {
-    char *buffer = hash_alloc("sha256", password, strlen(password));
-    if (IS_ERR(buffer)) {
-        return PTR_ERR(buffer);
-    }
-
+int registry_delete(const char *dev_name) {
     unsigned long flags;
     spin_lock_irqsave(&write_lock, flags);
     struct snapshot_metadata *it = get_by_name(dev_name);
-    int err = -EWRONGCRED;
-    if (it && !memcmp(buffer, it->password, SHA256_LEN)) {
+    int err;
+    if (it) {
         list_del_rcu(&it->list);
         err = 0;
+    } else {
+        err = -EWRONGCRED;
     }
     spin_unlock_irqrestore(&write_lock, flags);
     
-    kfree(buffer);
     if (!err) {
         call_rcu(&it->rcu, registry_delete_rcu);
     }
@@ -319,7 +301,6 @@ int registry_session_prealloc(const char *dev_name, dev_t dev) {
     new_node->session = new_ssn;
     new_node->dev_name = current_node->dev_name;
     new_node->dev_name_hash = current_node->dev_name_hash;
-    memcpy(new_node->password, current_node->password, SHA256_LEN);
     list_replace_rcu(&current_node->list, &new_node->list);
     spin_unlock_irqrestore(&write_lock, flags);
 
@@ -333,38 +314,6 @@ release_lock:
     kfree(new_node);
     session_destroy(new_ssn);
     return err;
-}
-
-static void free_node_only_rcu(struct rcu_head *head) {
-    struct snapshot_metadata *node = container_of(head, struct snapshot_metadata, rcu);
-    kfree(node);
-}
-
-/**
- * registry_put_session attempts to decrement the usage counter of a session associated
- * to device number dev. Once the counter drops to zero, the corresponding session isn't free
- * immediately but it can be replaced by a new session if an appropriate device is mounted in the system.
- */
-int registry_session_put(dev_t dev) {
-    // it indicates that there is no need for an update so we can deallocate
-    // the memory previously allocated
-    unsigned long flags;
-    spin_lock_irqsave(&write_lock, flags);
-    int err;
-    struct snapshot_metadata *node = registry_get_by(by_dev, &dev);
-    if (!node) {
-        pr_debug(pr_format("no device associated to %d:%d"), MAJOR(dev), MINOR(dev));
-        err = -ENODEV;
-        goto unlock;
-    }
-    struct session *s = node->session;
-    if (WARN(!s, "registry_session_put: no session associated to %d:%d", MAJOR(dev), MINOR(dev))) {
-        err = -ENOSSN;
-        goto unlock;
-    }
-unlock:
-    spin_unlock_irqrestore(&write_lock, flags);
-    return 0;
 }
 
 static inline bool by_dev_and_time_ge(struct snapshot_metadata *node, const void *args) {
@@ -409,7 +358,7 @@ bool registry_session_id(dev_t dev, struct timespec64 *read_completed_on, char *
  * processes.
  */
 void registry_session_destroy(dev_t dev) {
-    struct snapshot_metadata *new_node = node_alloc_noname(GFP_KERNEL);
+    struct snapshot_metadata *new_node = node_alloc_noname(GFP_ATOMIC);
     if (!new_node) {
         pr_err("out of memory");
         return;
@@ -426,7 +375,6 @@ void registry_session_destroy(dev_t dev) {
     
     new_node->dev_name = it->dev_name;
     new_node->dev_name_hash = it->dev_name_hash;
-    memcpy(new_node->password, it->password, SHA256_LEN);
     new_node->session = NULL;
 
     list_replace_rcu(&it->list, &new_node->list);

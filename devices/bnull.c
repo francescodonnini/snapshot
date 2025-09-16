@@ -13,7 +13,7 @@
 static struct bnull_dev {
     int                    major;
     int                    first_minor;
-    struct block_device   *bdev;
+    struct file           *bd_file;
     struct gendisk        *gd;
     struct blk_mq_tag_set  tag_set;
     struct request_queue  *queue;
@@ -102,19 +102,17 @@ static void gendisk_delete(struct bnull_dev *dev) {
     blk_mq_free_tag_set(&dev->tag_set);
 }
 
-static struct block_device* bdev_get_by_dev(dev_t dev) {
+static struct file *bd_open(dev_t d) {
     blk_mode_t mode = BLK_OPEN_WRITE;
-    struct file *fp = bdev_file_open_by_dev(dev, mode, NULL, NULL);
+    struct file *fp = bdev_file_open_by_dev(d, mode, NULL, NULL);
     if (IS_ERR(fp)) {
         pr_err("failed to open block device '%s'", DEV_NAME);
-        return ERR_CAST(fp);
     }
-    struct block_device *blk_dev = file_bdev(fp);
-    filp_close(fp, NULL);
-    return blk_dev;
+    return fp;
 }
 
 int bnull_init(void) {
+    memset(&dev, 0, sizeof(dev));
     int major = register_blkdev(0, DEV_NAME);
     if (major < 0) {
         pr_err("failed to register block device '%s': %d", DEV_NAME, major);
@@ -125,13 +123,14 @@ int bnull_init(void) {
     if (err) {
         goto unregister_bdev;
     }
-    struct block_device *bdev = bdev_get_by_dev(MKDEV(major, 0));
-    if (IS_ERR(bdev) || !bdev) {
-        err = PTR_ERR(bdev);
-        pr_err("failed to get block device '%s', got error %d", DEV_NAME, err);
+    dev_t d = MKDEV(major, 0);
+    struct file *bd_file = bd_open(d);
+    if (IS_ERR(bd_file)) {
+        err = PTR_ERR(bd_file);
+        pr_err("failed to get block device file of device %d:%d, got error %d", MAJOR(d), MINOR(d), err);
         goto delete_disk;
     }
-    dev.bdev = bdev;
+    dev.bd_file = bd_file;
     return 0;
 
 delete_disk:
@@ -142,10 +141,15 @@ unregister_bdev:
 }
 
 void bnull_cleanup(void) {
+    if (dev.bd_file) {
+        filp_close(dev.bd_file, NULL);
+    }
     gendisk_delete(&dev);
-    unregister_blkdev(dev.major, DEV_NAME);
+    if (dev.major) {
+        unregister_blkdev(dev.major, DEV_NAME);
+    }
 }
 
 struct block_device *bnull_get_bdev(void) {
-    return dev.bdev;
+    return file_bdev(dev.bd_file);
 }

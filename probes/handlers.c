@@ -48,7 +48,7 @@ static int register_all_kretprobes(void) {
     }
     int err = register_kretprobes(kretprobe_table, KRETPROBES_NUM);
     if (err) {
-        pr_debug(pr_format("cannot register kretprobes\n"));
+        pr_debug(pr_format("cannot register kretprobes, got error %d"), err);
     }
     return err;
 }

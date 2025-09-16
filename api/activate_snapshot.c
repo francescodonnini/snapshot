@@ -1,13 +1,12 @@
 #include "api.h"
+#include "auth.h"
 #include "pr_format.h"
 #include "registry.h"
 #include <linux/printk.h>
 
 int activate_snapshot(const char *dev_name, const char *password) {
-    int err = registry_insert(dev_name, password);
-    if (err) {
-        pr_debug(pr_format("cannot insert %s because of error %d\n"), dev_name, err);
-        return err;
+    if (auth_check_password(password)) {
+        return -EWRONGCRED;
     }
-    return 0;
+    return registry_insert(dev_name);
 }

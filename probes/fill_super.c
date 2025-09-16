@@ -89,6 +89,6 @@ int kill_block_super_entry_handler(struct kretprobe_instance *kp, struct pt_regs
 int kill_block_super_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
     dev_t *data = (dev_t*)kp->data;
     dev_t dev = *data;
-    registry_session_put(dev);
+    registry_session_destroy(dev);
     return 0;
 }

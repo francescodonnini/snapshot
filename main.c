@@ -1,3 +1,4 @@
+#include "auth.h"
 #include "bio.h"
 #include "bnull.h"
 #include "chrdev.h"
@@ -10,10 +11,20 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/printk.h>
+#include <linux/string.h>
 #include <linux/types.h>
 
+static char *password;
+module_param(password, charp, 0);
+MODULE_PARM_DESC(password, "Password required to use snapshot service");
+
 static int __init bsnapshot_init(void) {
-    int err = registry_init();
+    int err = auth_set_password(password);
+    if (err) {
+        goto out;
+    }
+    memset(password, 0, strlen(password));
+    err = registry_init();
     if (err) {
         goto registry_failed;
     }
@@ -44,6 +55,9 @@ bnull_failed:
 chrdev_failed:
     registry_cleanup();
 registry_failed:
+    auth_clear_password();
+out:
+    pr_err("snapshot initialization failed, got error %d", err);
     return err;
 }
 
@@ -53,6 +67,7 @@ static void __exit bsnapshot_exit(void) {
     bnull_cleanup();
     chrdev_cleanup();
     registry_cleanup();
+    auth_clear_password();
 }
 
 MODULE_AUTHOR("Francesco Donnini <donnini.francesco00@gmail.com>");

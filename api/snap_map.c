@@ -5,7 +5,6 @@
 #include <linux/spinlock.h>
 #include <linux/srcu.h>
 
-static LIST_HEAD(empty_list);
 static LIST_HEAD(map_list);
 static DEFINE_SPINLOCK(write_lock);
 static struct srcu_struct srcu;
@@ -16,12 +15,13 @@ int snap_map_init(void) {
 }
 
 void snap_map_cleanup(void) {
+    LIST_HEAD(list);
     spin_lock(&write_lock);
-    list_splice_init(&map_list, &map_list);
+    list_splice_init(&map_list, &list);
     spin_unlock(&write_lock);
     synchronize_srcu(&srcu);
     struct snap_map *pos, *tmp;
-    list_for_each_entry_safe(pos, tmp, &map_list, list) {
+    list_for_each_entry_safe(pos, tmp, &list, list) {
         rbitmap32_destroy(&pos->bitmap);
         kfree(pos);
     }
