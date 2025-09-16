@@ -142,6 +142,7 @@ unregister_bdev:
 
 void bnull_cleanup(void) {
     if (dev.bd_file) {
+        pr_info("closing file...");
         filp_close(dev.bd_file, NULL);
     }
     gendisk_delete(&dev);

@@ -23,7 +23,6 @@ static int __init bsnapshot_init(void) {
     if (err) {
         goto out;
     }
-    memset(password, 0, strlen(password));
     err = registry_init();
     if (err) {
         goto registry_failed;
@@ -36,20 +35,20 @@ static int __init bsnapshot_init(void) {
     if (err) {
         goto bnull_failed;
     }
-    err = snapshot_init();
-    if (err) {
-        goto snapshot_init_failed;
-    }
-    err = probes_init();
-    if (err) {
-        goto probes_failed;
-    }
+    // err = snapshot_init();
+    // if (err) {
+    //     goto snapshot_init_failed;
+    // }
+    // err = probes_init();
+    // if (err) {
+    //     goto probes_failed;
+    // }
     return 0;
 
-probes_failed:
-    snapshot_cleanup();
-snapshot_init_failed:
-    bnull_cleanup();
+// probes_failed:
+//     snapshot_cleanup();
+// snapshot_init_failed:
+//     bnull_cleanup();
 bnull_failed:
     chrdev_cleanup();
 chrdev_failed:
@@ -62,8 +61,8 @@ out:
 }
 
 static void __exit bsnapshot_exit(void) {
-    probes_cleanup();
-    snapshot_cleanup();
+    // probes_cleanup();
+    // snapshot_cleanup();
     bnull_cleanup();
     chrdev_cleanup();
     registry_cleanup();
