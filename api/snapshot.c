@@ -212,14 +212,6 @@ out_unlock_put:
     return err;
 }
 
-static char *bitmap_fmt(char *out, unsigned long *bitmap, unsigned long nbits) {
-    char *p = out;
-    for (size_t i = 0; i < nbits; ++i) {
-        sprintf(p++, "%d", test_bit(i, bitmap));
-    }
-    return out;
-}
-
 static void save_block(struct work_struct *work) {
     struct block_work *w = container_of(work, struct block_work, work);
     size_t path_len = strlen(ROOT_DIR) + strlen(w->session_id) + MAX_NAME_LEN + 3;
@@ -240,17 +232,12 @@ static void save_block(struct work_struct *work) {
         goto free_data;
     }
     
-    char *str = kzalloc(sectors_num + 1, GFP_KERNEL);
-    if (!str) {
-        goto free_map;
-    }
-    
     int err = snap_map_add_range(w->device, &w->session_created_on, w->sector, w->sector + sectors_num, added);
     if (err) {
         pr_err("cannot add range [%llu, %llu) to bitmap, got error %d", w->sector, w->sector + sectors_num, err);
         goto free_data;
     } else {
-        pr_info("add_range[%llu, %llu): %s", w->sector, w->sector + sectors_num, bitmap_fmt(str, added, sectors_num));
+        pr_info("add_range[%llu, %llu)", w->sector, w->sector + sectors_num);
     }
     
     unsigned long lo = 0, hi;
@@ -260,7 +247,6 @@ static void save_block(struct work_struct *work) {
         lo = hi;
     }
     
-    kfree(str);
 free_map:
     small_bitmap_free(&map);
 free_data:
