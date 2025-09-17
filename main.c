@@ -7,6 +7,7 @@
 #include "registry.h"
 #include "snapshot.h"
 #include <linux/crypto.h>
+#include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -21,7 +22,7 @@ MODULE_PARM_DESC(password, "Password required to use snapshot service");
 static int __init bsnapshot_init(void) {
     int err = auth_set_password(password);
     if (err) {
-        goto out;
+        return err;
     }
     err = registry_init();
     if (err) {
@@ -31,39 +32,38 @@ static int __init bsnapshot_init(void) {
     if (err) {
         goto chrdev_failed;
     }
+    err = snapshot_init();
+    if (err) {
+        goto snapshot_init_failed;
+    }
+    err = probes_init();
+    if (err) {
+        goto probes_init_failed;
+    }
     err = bnull_init();
     if (err) {
-        goto bnull_failed;
+        goto bnull_init_failed;
     }
-    // err = snapshot_init();
-    // if (err) {
-    //     goto snapshot_init_failed;
-    // }
-    // err = probes_init();
-    // if (err) {
-    //     goto probes_failed;
-    // }
-    return 0;
+    return err;
 
-// probes_failed:
-//     snapshot_cleanup();
-// snapshot_init_failed:
-//     bnull_cleanup();
-bnull_failed:
+bnull_init_failed:
+    probes_cleanup();
+probes_init_failed:
+    snapshot_cleanup();
+snapshot_init_failed:
     chrdev_cleanup();
 chrdev_failed:
     registry_cleanup();
 registry_failed:
     auth_clear_password();
-out:
-    pr_err("snapshot initialization failed, got error %d", err);
+    pr_err("bsnapshots_init failed, got error %d", err);
     return err;
 }
 
 static void __exit bsnapshot_exit(void) {
-    // probes_cleanup();
-    // snapshot_cleanup();
     bnull_cleanup();
+    probes_cleanup();
+    snapshot_cleanup();
     chrdev_cleanup();
     registry_cleanup();
     auth_clear_password();

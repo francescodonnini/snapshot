@@ -1,5 +1,6 @@
 #ifndef BNULL_H
 #define BNULL_H
+#include <linux/types.h>
 
 int bnull_init(void);
 

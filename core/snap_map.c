@@ -25,6 +25,7 @@ void snap_map_cleanup(void) {
         rbitmap32_destroy(&pos->bitmap);
         kfree(pos);
     }
+    cleanup_srcu_struct(&srcu);
 }
 
 static void snap_map_destroy_srcu(struct callback_head *head) {

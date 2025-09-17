@@ -236,8 +236,6 @@ static void save_block(struct work_struct *work) {
     if (err) {
         pr_err("cannot add range [%llu, %llu) to bitmap, got error %d", w->sector, w->sector + sectors_num, err);
         goto free_data;
-    } else {
-        pr_info("add_range[%llu, %llu)", w->sector, w->sector + sectors_num);
     }
     
     unsigned long lo = 0, hi;
@@ -247,7 +245,6 @@ static void save_block(struct work_struct *work) {
         lo = hi;
     }
     
-free_map:
     small_bitmap_free(&map);
 free_data:
     __free_pages(w->data.page, get_order(w->data.len));
@@ -367,8 +364,6 @@ static void read_original_block_end_io(struct bio *bio) {
         pr_err("bio completed with error %d", bio->bi_status);
         bio_private_data_destroy(p_data);
         p_data = NULL;
-    } else {
-        pr_info("read_original_block_end_io: read sector %llu, %lu bytes", p_data->sector, p_data->bytes);
     }
     read_bio_enqueue(orig_bio, p_data);
     bio_put(bio);

@@ -27,7 +27,7 @@ static struct kretprobe submit_bio_kretprobe = {
     .entry_handler = submit_bio_entry_handler,
 };
 
-static struct kretprobe singlegilefs_fill_super_kretprobe = {
+static struct kretprobe singlefilefs_fill_super_kretprobe = {
     .kp.symbol_name = "singlefilefs_fill_super",
     .entry_handler = singlefilefs_fill_super_entry_handler,
     .handler = singlefilefs_fill_super_handler,
@@ -35,30 +35,22 @@ static struct kretprobe singlegilefs_fill_super_kretprobe = {
 };
 
 static struct kretprobe *kretprobe_table[] = {
+    &singlefilefs_fill_super_kretprobe,
     &ext4_fill_super_kretprobe,
     &kill_block_super_kretprobe,
-    &singlegilefs_fill_super_kretprobe,
     &submit_bio_kretprobe,
 };
-static size_t KRETPROBES_NUM = sizeof(kretprobe_table) / sizeof(struct kretprobe*);
+static const size_t KRETPROBES_NUM = sizeof(kretprobe_table) / sizeof(struct kretprobe*);
 
-static int register_all_kretprobes(void) {
+int probes_init(void) {
     if (KRETPROBES_NUM <= 0) {
         return 0;
     }
     int err = register_kretprobes(kretprobe_table, KRETPROBES_NUM);
     if (err) {
-        pr_debug(pr_format("cannot register kretprobes, got error %d"), err);
+        pr_err("cannot register kretprobes, got error %d", err);
     }
     return err;
-}
- 
-int probes_init(void) {
-    int err = register_all_kretprobes();
-    if (err) {
-        return err;
-    }
-    return 0;
 }
 
 void probes_cleanup(void) {

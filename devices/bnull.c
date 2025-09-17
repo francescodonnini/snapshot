@@ -8,12 +8,13 @@
 #include <linux/sprintf.h>
 
 #define DEV_NAME       "bnull"
+#define BLOCK_MINORS   (1)
 #define BNULL_CAPACITY (1024)
 
 static struct bnull_dev {
     int                    major;
     int                    first_minor;
-    struct file           *bd_file;
+    struct block_device   *bdev;
     struct gendisk        *gd;
     struct blk_mq_tag_set  tag_set;
     struct request_queue  *queue;
@@ -36,101 +37,80 @@ static const struct block_device_operations bops = {
     .owner = THIS_MODULE,
 };
 
-static void tag_set_init(struct bnull_dev *blk_dev) {
-    memset(&blk_dev->tag_set, 0, sizeof(blk_dev->tag_set));
+static void gendisk_delete(struct bnull_dev *dev) {
+    del_gendisk(dev->gd);
+    put_disk(dev->gd);
+    blk_mq_free_tag_set(&dev->tag_set);
+}
+
+/**
+ * disk_create - creates a disk and adds it to the system.
+ */
+static int disk_create(struct bnull_dev *blk_dev) {
     blk_dev->tag_set.ops = &qops;
     blk_dev->tag_set.nr_hw_queues = 1;
     blk_dev->tag_set.queue_depth = 128;
     blk_dev->tag_set.numa_node = NUMA_NO_NODE;
     blk_dev->tag_set.cmd_size = 0;
     blk_dev->tag_set.driver_data = blk_dev;
-}
-
-static int alloc_tag_set(struct bnull_dev *blk_dev) {
-    tag_set_init(blk_dev);
     int err = blk_mq_alloc_tag_set(&blk_dev->tag_set);
     if (err) {
-        pr_err("cannot allocate tag set for '%s'\n", DEV_NAME);
-    }
-    return err;
-}
-
-/**
- * gendisk_create - creates a disk and adds it to the system.
- */
-static int gendisk_create(struct bnull_dev *blk_dev) {
-    int nr_minors = 1;
-    int err = alloc_tag_set(blk_dev);
-    if (err) {
+        pr_err("cannot allocate tag set for device %s, got error %d", DEV_NAME, err);
         return err;
     }
-    struct gendisk *gd = blk_mq_alloc_disk(&blk_dev->tag_set, NULL, NULL);
+
+    struct gendisk *gd = blk_mq_alloc_disk(&blk_dev->tag_set, NULL, blk_dev);
     if (IS_ERR(gd)) {
         err = PTR_ERR(gd);
-        pr_err("failed to allocate gendisk for '%s', got error %d", DEV_NAME, err);
-        goto free_tag_set;
+        pr_err("cannot allocate gendisk for device %s, got error %d", DEV_NAME, err);
+        goto out;
     }
+
     snprintf(gd->disk_name, 32, "%s", DEV_NAME);
     gd->major = blk_dev->major;
     gd->first_minor = 0;
-    gd->minors = nr_minors;
+    gd->minors = BLOCK_MINORS;
     gd->fops = &bops;
     gd->private_data = blk_dev;
     blk_dev->queue = gd->queue;
     blk_dev->queue->queuedata = blk_dev;
     set_capacity(gd, BNULL_CAPACITY);
-    blk_dev->gd = gd;
-    err = add_disk(blk_dev->gd);
+    err = add_disk(gd);
     if (err) {
-        pr_err("failed to add gendisk for '%s', got error %d", DEV_NAME, err);
-        goto add_disk_failed;
+        pr_err("failed to add gendisk for device %s, got error %d", DEV_NAME, err);
+        goto out2;
     }
+    blk_dev->gd = gd;
     return 0;
 
-add_disk_failed:
-    put_disk(blk_dev->gd);
-free_tag_set:
+out2:
+    put_disk(gd);
+out:
     blk_mq_free_tag_set(&blk_dev->tag_set);
     return err;
-}
-
-static void gendisk_delete(struct bnull_dev *dev) {
-    if (dev->gd) {
-        del_gendisk(dev->gd);
-        put_disk(dev->gd);
-    }
-    blk_mq_free_tag_set(&dev->tag_set);
-}
-
-static struct file *bd_open(dev_t d) {
-    blk_mode_t mode = BLK_OPEN_WRITE;
-    struct file *fp = bdev_file_open_by_dev(d, mode, NULL, NULL);
-    if (IS_ERR(fp)) {
-        pr_err("failed to open block device '%s'", DEV_NAME);
-    }
-    return fp;
 }
 
 int bnull_init(void) {
     memset(&dev, 0, sizeof(dev));
     int major = register_blkdev(0, DEV_NAME);
     if (major < 0) {
-        pr_err("failed to register block device '%s': %d", DEV_NAME, major);
+        pr_err("unable to register %s block device, got error %d", DEV_NAME, major);
         return major;
     }
     dev.major = major;
-    int err = gendisk_create(&dev);
+
+    int err = disk_create(&dev);
     if (err) {
         goto unregister_bdev;
     }
-    dev_t d = MKDEV(major, 0);
-    struct file *bd_file = bd_open(d);
-    if (IS_ERR(bd_file)) {
-        err = PTR_ERR(bd_file);
-        pr_err("failed to get block device file of device %d:%d, got error %d", MAJOR(d), MINOR(d), err);
+
+    struct block_device *bdev = dev.gd->part0;
+    if (!bdev) {
+        pr_err("block device structure is NULL");
+        err = -ENODEV;
         goto delete_disk;
     }
-    dev.bd_file = bd_file;
+    dev.bdev = bdev;
     return 0;
 
 delete_disk:
@@ -140,17 +120,11 @@ unregister_bdev:
     return err;
 }
 
-void bnull_cleanup(void) {
-    if (dev.bd_file) {
-        pr_info("closing file...");
-        filp_close(dev.bd_file, NULL);
-    }
+void bnull_cleanup() {
     gendisk_delete(&dev);
-    if (dev.major) {
-        unregister_blkdev(dev.major, DEV_NAME);
-    }
+    unregister_blkdev(dev.major, DEV_NAME);
 }
 
 struct block_device *bnull_get_bdev(void) {
-    return file_bdev(dev.bd_file);
+    return dev.bdev;
 }

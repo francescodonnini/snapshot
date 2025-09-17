@@ -6,7 +6,7 @@
 #define SHA256_LEN (32)
 #define PASSWD_MAX (64)
 
-static uint8_t *p_hash = NULL;
+static char *p_hash = NULL;
 
 bool auth_check_password(const char *password) {
     if (p_hash == NULL) {

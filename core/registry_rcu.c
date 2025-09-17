@@ -468,6 +468,8 @@ ssize_t registry_show_session(char *buf, size_t size) {
     rcu_read_unlock();
     if (err && br + strlen("EOF") < size) {
         br += sprintf(&buf[br], "EOF");
+    } else if (!br) {
+        br += sprintf(buf, "(no devices)\n");
     }
     return br;
 }
