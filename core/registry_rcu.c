@@ -15,6 +15,7 @@
 #include <linux/time.h>
 #include <linux/uuid.h>
 
+// Little auxiliary struct used by "by_dev_and_time_ge" predicate
 struct node_dev {
     struct timespec64 *time;
     dev_t              dev;
@@ -70,7 +71,7 @@ void registry_cleanup(void) {
 }
 
 /**
- * registry_lookup_rcu returns true if a node in the list satisfies a certain predicate, it runs inside an RCU
+ * registry_lookup_rcu returns true if a node in the list satisfies a certain predicate, it runs inside a RCU
  * critical section
  */
 static inline bool registry_lookup_rcu(bool(*pred)(struct snapshot_metadata*, const void *args), const void *args) {
@@ -124,9 +125,6 @@ static inline bool by_dev(struct snapshot_metadata *node, const void *args) {
     return s && s->dev == *dev;
 }
 
-/**
- * get_by_name search a node whose device name is equal to name. It assumes it's called while a spinlock is held.
- */
 static inline struct snapshot_metadata *get_by_name(const char *name) {
     struct node_name nn = {
         .hash = fast_hash(name),
@@ -135,9 +133,6 @@ static inline struct snapshot_metadata *get_by_name(const char *name) {
     return registry_get_by(by_name, &nn);
 }
 
-/**
- * get_by_name search a node whose device name is equal to name. It assumes it's called while a spinlock is held.
- */
 static inline struct snapshot_metadata *get_by_name_rcu(const char *name) {
     struct node_name nn = {
         .hash = fast_hash(name),
@@ -146,9 +141,23 @@ static inline struct snapshot_metadata *get_by_name_rcu(const char *name) {
     return registry_get_by_rcu(by_name, &nn);
 }
 
-/**
- * helper function that initializes the pointer of password to the correct addresses.
- */
+static inline bool by_dev_and_time_ge(struct snapshot_metadata *node, const void *args) {
+    struct node_dev *nd = (struct node_dev*)args;
+    struct session *s = node->session;
+    if (!s) {
+        return false;
+    }
+    return s->dev == nd->dev && timespec64_compare(&s->created_on, nd->time) <= 0;
+}
+
+static inline struct snapshot_metadata *get_by_dev_and_time_ge_rcu(dev_t dev, struct timespec64 *time) {
+    struct node_dev nd = {
+        .dev = dev,
+        .time = time,
+    };
+    return registry_get_by_rcu(by_dev_and_time_ge, &nd);
+}
+
 static inline struct snapshot_metadata *node_alloc_noname(gfp_t gfp) {
     struct snapshot_metadata *node;
     node = kzalloc(sizeof(*node), gfp);
@@ -177,12 +186,11 @@ static inline struct snapshot_metadata *node_alloc(const char *name, gfp_t gfp) 
 
 /**
  * mk_node allocates memory for a struct snapshot_metadata and initializes some of its fields:
- * it copies dev_name and the hash of password to the newly allocated memory area, and it stores the hash of dev_name.
+ * it copies dev_name to the newly allocated memory area, and it stores its hash.
  * It returns:
  * * -ETOOBIG if dev_name is too long to represent a valid file path;
  * * -ENOMEM if kmalloc failed to allocate enough memory to hold struct snapshot_metadata
- * *  other errors if it was not possibile to compute the cryptographic hash function of password (see 'hash' and 'hash_alloc' for details)
- * *  a pointer to the newly allocated memory area otherwise.
+ * * a pointer to the newly allocated memory area otherwise.
  */
 static struct snapshot_metadata* mk_node(const char *dev_name) {
     size_t n = strnlen(dev_name, PATH_MAX);
@@ -316,23 +324,6 @@ release_lock:
     return err;
 }
 
-static inline bool by_dev_and_time_ge(struct snapshot_metadata *node, const void *args) {
-    struct node_dev *nd = (struct node_dev*)args;
-    struct session *s = node->session;
-    if (!s) {
-        return false;
-    }
-    return s->dev == nd->dev && timespec64_compare(&s->created_on, nd->time) <= 0;
-}
-
-static inline struct snapshot_metadata *get_by_dev_and_time_ge_rcu(dev_t dev, struct timespec64 *time) {
-    struct node_dev nd = {
-        .dev = dev,
-        .time = time,
-    };
-    return registry_get_by_rcu(by_dev_and_time_ge, &nd);
-}
-
 /**
  * registry_session_id returns true if there exists a session associated to device number dev and read_completed_on >= session creation date,
  * false otherwise.
@@ -400,8 +391,7 @@ int registry_add_range(dev_t dev, struct timespec64 *created_on, struct b_range 
         pr_debug(pr_format("registry_add_range: no session associated to device %d:%d"), MAJOR(dev), MINOR(dev));
         goto out;
     }
-    struct session *s = it->session;
-    err = itree_add(s, range);
+    err = itree_add(it->session, range);
 out:
     rcu_read_unlock();
     return err;
