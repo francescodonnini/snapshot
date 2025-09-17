@@ -29,6 +29,20 @@ static inline void small_bitmap_free(struct small_bitmap *b) {
     }
 }
 
+/**
+ * small_bitmap_next_set_region iterates over all the bitmap regions made up entirely of ones. It returns false if all the
+ * elements in the bitmap have been consumed the iterator, true otherwise. lo is an input/output parameter, it's the index in the bitmap from which
+ * to start the reading, after the function completes it is updated with the position of the first bit equal to one starting from its old value.
+ * hi is an output parameter, after the function completes (and returns true) it's the position of the first zero after the last one seen starting from lo.
+ * 
+ * lo initial value is usually zero, it should get the value of hi after each iteration. For example:
+ * 
+ * unsigned long lo = 0, hi;
+ * while (small_bitmap_next_set_region(&map, &lo, &hi)) {
+ *      // do something
+ *      lo = hi;
+ * }
+ */
 static inline bool small_bitmap_next_set_region(struct small_bitmap *map, unsigned long *lo, unsigned long *hi) {
     *lo = find_next_bit(map->map, map->nbits, *lo);
     if (*lo >= map->nbits) {
