@@ -7,11 +7,11 @@
 #define ENOSSN     5004
 
 struct session {
+    struct rcu_head    rcu;
     dev_t              dev;
-    char              *id;
     struct timespec64  created_on;
     struct maple_tree  tree;
-    struct rcu_head    rcu;
+    char               id[];
 };
 
 int get_session_id_len(void);

@@ -24,12 +24,11 @@ static int gen_uuid(char *out, size_t n) {
 
 struct session *session_create(dev_t dev) {
     struct session *s;
-    size_t size = sizeof(*s) + ALIGN(get_session_id_len() + 1, sizeof(void*));
+    size_t size = sizeof(*s) + get_session_id_len() + 1;
     s = kzalloc(size, GFP_ATOMIC);
     if (!s) {
         return NULL;
     }
-    s->id = (char*)s + sizeof(*s);
     if (gen_uuid(s->id, get_session_id_len() + 1)) {
         goto out;
     }
