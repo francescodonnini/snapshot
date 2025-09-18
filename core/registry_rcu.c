@@ -237,6 +237,7 @@ static void registry_delete_rcu(struct rcu_head *head) {
     struct snapshot_metadata *node = container_of(head, struct snapshot_metadata, rcu);
     struct session *s = node->session;
     if (s) {
+        snap_map_destroy(s->dev, &s->created_on);
         session_destroy(s);
     }
     kfree(node->dev_name);
@@ -270,10 +271,10 @@ int registry_delete(const char *dev_name) {
 
 static void free_session_rcu(struct rcu_head *head) {
     struct snapshot_metadata *node = container_of(head, struct snapshot_metadata, rcu);
-    if (node->session) {
-        struct session *s = node->session;
-        session_destroy(node->session);
+    struct session *s = node->session;
+    if (s) {
         snap_map_destroy(s->dev, &s->created_on);
+        session_destroy(s);
     }
     kfree(node);
 }
