@@ -24,8 +24,7 @@ static int gen_uuid(char *out, size_t n) {
 
 struct session *session_create(dev_t dev) {
     struct session *s;
-    size_t size = sizeof(*s) + get_session_id_len() + 1;
-    s = kzalloc(size, GFP_ATOMIC);
+    s = kzalloc(sizeof(*s) + get_session_id_len() + 1, GFP_ATOMIC);
     if (!s) {
         return NULL;
     }
