@@ -45,6 +45,10 @@ struct workqueue_struct *write_bio_wq;
 struct workqueue_struct *read_bio_wq;
 struct workqueue_struct *save_blocks_wq;
 
+/**
+ * mkdir_snapshots creates the directory /snapshots if it doesn't exist. It returns 0 on success or if it already exists,
+ * <0 otherwise.
+ */
 static int mkdir_snapshots(void) {
     struct path parent;
     int err = kern_path("/", LOOKUP_DIRECTORY, &parent);
@@ -141,6 +145,11 @@ void snapshot_cleanup(void) {
     snap_map_cleanup();
 }
 
+/**
+ * file_write writes a region of a page (pointed by he page_iter struct) delimited by [offset, offset + nbytes).
+ * It fails if the file already exists (some other thread has already written the data) or if it isn't possible
+ * to create or write to the file.
+ */
 static void file_write(const char *path, struct page_iter *it, unsigned long offset, unsigned long nbytes) {    
     struct file *fp = filp_open(path, O_CREAT | O_EXCL | O_WRONLY, 0644);
     if (IS_ERR(fp)) {
@@ -164,6 +173,10 @@ out:
     }
 }
 
+/**
+ * mkdir_session creates the directory /snapshots/<session> if it doesn't exist. It returns 0 on success or if it already exists,
+ * <0 otherwise.
+ */
 static int mkdir_session(const char *session) {
     struct path parent;
     int err = kern_path(ROOT_DIR, LOOKUP_DIRECTORY, &parent);
@@ -266,7 +279,7 @@ static void bio_private_data_destroy(struct bio_private_data *p_data) {
 }
 
 /**
- * snapshot_save schedules each page or compound one of bio to the workqueue. Each page
+ * snapshot_save submit the original bio and schedules each page or compound one of bio to the workqueue. Each page
  * will be saved to /snapshots/<session id>/<sector no>
  */
 static void snapshot_save(struct work_struct *work) {
@@ -354,8 +367,9 @@ static void read_bio_enqueue(struct bio *orig_bio, struct bio_private_data *p_da
 }
 
 /**
- * read_original_block_end_io saves current bio to file and submit original write bio to
- * block IO layer
+ * read_original_block_end_io schedules the read_bio to the workqueue read_bio_wq. It isn't possible
+ * to submit the original bio at this point because this callback could be called in an atomic context and
+ * submit_bio can call schedule().
  */
 static void read_original_block_end_io(struct bio *bio) {
     struct bio_private_data *p_data = (struct bio_private_data*)bio->bi_private;
@@ -415,7 +429,7 @@ out:
 }
 
 /**
- * create_read_bio creates a read request to the block IO layer. This request has a callback that schedules the original
+ * create_read_bio creates a read request of the block IO layer. This request has a callback that schedules the original
  * write bio after the targeted region has been read from the block device
  */
 static struct bio* create_read_bio(struct bio *orig_bio) {
