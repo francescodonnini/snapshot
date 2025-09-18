@@ -1,92 +1,108 @@
+#include "restore.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <linux/dirent.h>s
-#define BLOCK_SIZE     (512)
+#include <fts.h>
 
-static char block[BLOCK_SIZE];
-static char path[4096];
-
-static void dump_block(const char *block, off_t start) {
-    char *str = malloc(4096);
-    if (!str) return;
-    memset(str, 0, 4096);
-    char *s = str;
-    size_t w = 0;
-    size_t i = 0;
-    while (i < 512) {
-        s += sprintf(s, "%06x\t", start + i * 16);
-        for (int j = 0; j < 16 && i + j < 512; ++j) {
-            if (j < 15) {
-                s += sprintf(s, "%02x ", block[i + j]);
-            } else {
-                s += sprintf(s, "%02x\n", block[i + j]);
-            }
-        }
-        i += 16;
+static int dd(FILE *off, FTSENT *p) {
+    unsigned long sector = strtoul(p->fts_name, NULL, 10);
+    if (!sector && errno) {
+        fprintf(stderr, "cannot convert file name %s to number, got error %d", p->fts_name, errno);
+        return -errno;
     }
-    printf("%s\n", str);
-    free(str);
-}
-
-static void hd(FILE *off, unsigned long sector) {
-    off_t offset = sector * BLOCK_SIZE;
-    fseek(off, offset, SEEK_SET);
-    fread(block, sizeof(char), BLOCK_SIZE, off);
-    dump_block(block, offset);
-}
-
-static int dd(FILE *off, const char *parent, unsigned long sector) {
-    sprintf(path, "%s/%lu", parent, sector);
-    FILE* iff = fopen(path, "r");
+    FILE* iff = fopen(p->fts_path, "r");
     if (!iff) {
-        printf("cannot open file %s", path);
-        return ferror(iff);
+        int err = ferror(iff);
+        fprintf(stderr, "cannot open file %s got error", p->fts_path, err);
+        return err;
     }
-    size_t n = fread(block, sizeof(char), BLOCK_SIZE, iff);
-    if (n < BLOCK_SIZE) {
-        printf("fread failed: cannot read block %s", path);
-        return ferror(iff) ? ferror(iff) : feof(iff);
+
+    int err = fseek(iff, 0, SEEK_END);
+    if (err) {
+        perror("fseek failed");
+        goto out;
     }
-    off_t offset = sector * BLOCK_SIZE;
+    long size = ftell(iff);
+    err = fseek(iff, 0, SEEK_SET);
+    if (err) {
+        perror("fseek failed");
+        goto out;
+    }
+    char *block = malloc(size);
+    if (!block) {
+        perror("out of memory");
+        err = -ENOMEM;
+        goto out2;
+    }
+    size_t n = fread(block, 1, size, iff);
+    if (n < size) {
+        if (feof(iff)) {
+            perror("EOF met too early");
+            err = EOF;
+        } else {
+            err = ferror(iff);
+            fprintf(stderr, "fread failed, got error %d", err);
+        }
+        goto out2;
+    }
+    off_t offset = sector * 512;
     fseek(off, offset, SEEK_SET);
-    n = fwrite(block, sizeof(char), BLOCK_SIZE, off);
-    if (n < BLOCK_SIZE) {
-        printf("fwrite failed: cannot write block %lu to %s", sector, path);
-        return ferror(off) ? ferror(off) : feof(off);
+    n = fwrite(block, sizeof(char), size, off);
+    if (n < size) {
+        if (feof(iff)) {
+            perror("EOF met too early");
+            err = EOF;
+        } else {
+            err = ferror(iff);
+            fprintf(stderr, "fwrite failed, got error %d", err);
+        }
     }
+out2:
+    free(block);
+out:
+    fclose(iff);
     return 0;
 }
 
-int main(int argc, const char *argv[]) {
-    if (--argc != 2) {
-        exit(EXIT_FAILURE);
-    }
-    const char *img_path = argv[1];
-    FILE* off = fopen(img_path, "r+");
+int restore_snapshot(const char *dev, char * const *snapshot) {
+    FILE* off = fopen(dev, "rb+");
     if (!off) {
-        printf("cannot open file %s\n", img_path);
-        exit(EXIT_FAILURE);
-    }
-
-    char *parent = malloc(4096);
-    if (!parent) {
+        int err = ferror(off);
+        fprintf(stderr, "cannot open %s got error %d", dev, err);
+        return err;
+    }    
+    int err;
+    const int fts_opts = FTS_COMFOLLOW | FTS_LOGICAL | FTS_NOCHDIR;
+    FTS *ftsp = fts_open(snapshot, fts_opts, NULL);
+    if (!ftsp) {
+        perror("fts_open failed");
+        err = -1;
         goto out;
     }
-    sprintf(parent, "/snapshots/%s", argv[2]);
-    DIR *d = opendir(parent);
-    if (d) {
-        for (struct dirent *dir = readd)
+    
+    FTSENT *chp = fts_children(ftsp, 0);
+    if (!chp) {
+        printf("directory %s is empty", snapshot);
+        err = 0;
+        goto out2;
     }
-    struct dirent *dir;
 
-    int err = dd(off, "/snapshots/3d0c63f5-920a-4e4a-a950-2bd95e6628fb", sector);
-    if (err) {
-        fclose(off);
-        exit(err);
+    for (FTSENT *p = fts_read(ftsp); p; p = fts_read(ftsp)) {
+        switch (p->fts_info) {
+            case FTS_F:
+                err = dd(off, p);
+                if (err) {
+                    break;
+                }
+                break;
+            default:
+                break;
+        }
     }
-    hd(off, sector);
+out2:
+    fts_close(ftsp);
 out:
     fclose(off);
+    return err;
 }

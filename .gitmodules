@@ -1,0 +1,3 @@
+[submodule "singlefile-FS"]
+	path = singlefile-FS
+	url = https://github.com/francescodonnini/singlefile-FS.git

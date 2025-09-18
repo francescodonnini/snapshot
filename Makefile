@@ -1,4 +1,6 @@
 obj-m += snapshot.o
+obj-m += singlefile-FS/
+
 snapshot-objs := 	core/activate_snapshot.o \
 					core/auth.o \
 					core/dbg_dump_bio.o \
@@ -36,13 +38,15 @@ CFLAGS_kretprobes/submit_bio.o += -DDEBUG
 CFLAGS_probes/handlers.o += -DDEBUG
 
 all: 
-		make -C /lib/modules/$(shell uname -r)/build M=$(PWD)  modules 
+		make -C /lib/modules/$(shell uname -r)/build M=$(PWD)  modules
 
 mount:
-		insmod snapshot.ko
+		insmod singlefile-FS/singlefilefs.ko
+		insmod snapshot.ko password="$(shell cat secrets/password)"
 
 rm:
 		rmmod snapshot
+		rmmod singlefilefs
 
 clean: 
 		make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean

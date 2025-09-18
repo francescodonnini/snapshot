@@ -1,3 +1,4 @@
+#include "restore.h"
 #include <argp.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -12,6 +13,7 @@
 #define IOCTL_DEACTIVATE_SNAPSHOT _IOWR(IOCTL_SNAPSHOT_MAGIC, IOCTL_DEACTIVATE_SNAPSHOT_NO, struct ioctl_params)
 
 #define LS_SNAPSHOT 0xbeef
+#define RESTORE_SNP 0xc0be
 
 enum {
     IOCTL_ACTIVATE_SNAPSHOT_NO = 0x70,
@@ -35,18 +37,18 @@ static struct argp_option options[] = {
 
 struct argp_fields {
     unsigned long  command;
-    char          *path;
-    char          *password;
+    char          *s1;
+    char          *s2;
 };
 
 static error_t parse_opt(int opt, char *arg, struct argp_state *state) {
     struct argp_fields *fields = state->input;
     switch (opt) {
         case 'p':
-            fields->path = arg;
+            fields->s1 = arg;
             break;
         case 'w':
-            fields->password = arg;
+            fields->s2 = arg;
             break;
         case ARGP_KEY_ARG:
             if (state->arg_num == 0) {
@@ -57,9 +59,17 @@ static error_t parse_opt(int opt, char *arg, struct argp_state *state) {
                 } else if (!strcmp(arg, "ls")) {
                     fields->command = LS_SNAPSHOT;
                 } else if (!strcmp(arg, "restore")) {
-                    fields->command = RESTORE;
+                    fields->command = RESTORE_SNP;
                 } else {
                     argp_error(state, "expected one of activate, deactivate or ls but got %s", arg);
+                }
+            } else if (fields->command == RESTORE_SNP) {
+                if (state->arg_num == 1) {
+                    fields->s1 = arg;
+                } else if (state->arg_num == 2) {
+                    fields->s2 = arg;
+                } else {
+                    argp_usage(state);
                 }
             } else {
                 argp_usage(state);
@@ -70,8 +80,12 @@ static error_t parse_opt(int opt, char *arg, struct argp_state *state) {
                 argp_error(state, "You must specify a command (activate|deactivate|ls|restore)");
             } else if (fields->command == IOCTL_ACTIVATE_SNAPSHOT
                        || fields->command == IOCTL_DEACTIVATE_SNAPSHOT) {
-                if (!fields->path || !fields->password) {
+                if (!fields->s1 || !fields->s2) {
                     argp_error(state, "activate/deactivate require --path and --password");
+                }
+            } else if (fields->command == RESTORE_SNP) {
+                if (!fields->s1 || !fields->s2) {
+                    argp_error(state, "restore requires image_path and session_id");
                 }
             }
             break;
@@ -85,7 +99,7 @@ static struct argp argp = { options, parse_opt, "Blkdev Snapshot", "Command line
 
 static void ls(void) {
     char line[1024];
-    FILE* fp = fopen("/sys/kernel/sessions/active", "r");
+    FILE* fp = fopen("/sys/class/bsnapshot_cls/bsnapshot/active", "r");
     if (!fp) {
         printf("module is not mounted\n");
         return;
@@ -102,23 +116,41 @@ int main(int argc, char *argv[]) {
     if (err) {
         exit(err);
     }
-    if (args.command == LS_SNAPSHOT) {
-        ls();
-        exit(EXIT_SUCCESS);
-    } else {
-        int fd = open("/dev/bsnapshot", O_RDWR);
-        if (fd < 0) {
-            printf("cannot open file, got error %d\n", errno);
-            exit(errno);
-        }
-        struct ioctl_params params = {
-            .path = args.path,
-            .path_len = strlen(args.path),
-            .password = args.password,
-            .password_len = strlen(args.password),
-        };
-        int err = ioctl(fd, args.command, &params);
-        exit(err);
-        printf("%s %s %s\n", args.command == IOCTL_ACTIVATE_SNAPSHOT ? "activate" : "deactivate", args.path, args.password);
+    switch (args.command) {
+        case IOCTL_ACTIVATE_SNAPSHOT:
+        case IOCTL_DEACTIVATE_SNAPSHOT:
+            int fd = open("/dev/bsnapshot", O_RDWR);
+            if (fd < 0) {
+                printf("cannot open file, got error %d\n", errno);
+                exit(errno);
+            }
+            struct ioctl_params params = {
+                .path = args.s1,
+                .path_len = strlen(args.s1),
+                .password = args.s2,
+                .password_len = strlen(args.s2),
+            };
+            err = ioctl(fd, args.command, &params);
+            if (!err) {
+                err = params.error;                
+            }
+            break;
+        case LS_SNAPSHOT:
+            ls();
+            break;
+        case RESTORE_SNP:
+            char *path = malloc(4096);
+            if (!path) {
+                perror("out of memory");
+                exit(-ENOMEM);
+            }
+            char *p[] = {path, NULL};
+            snprintf(path, 4096, "/snapshots/%s", args.s2);
+            err = restore_snapshot(args.s1, p);
+            free(path);
+            break;
+        default:
+            break;
     }
+    exit(err);
 }

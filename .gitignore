@@ -11,7 +11,9 @@
 **/*.order.cmd
 **/*.symvers
 **/*.symvers.cmd
+singlefile-FS/image*
 /docs/*
 /logs/*
+secrets/*
 .vscode/c_cpp_properties.json
 **/*.bin
