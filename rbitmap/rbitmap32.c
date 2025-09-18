@@ -231,6 +231,11 @@ static inline uint16_t last_item(uint32_t x, uint32_t hi_excl) {
     }
 }
 
+/**
+ * rbitmap32_add_range adds the 32-bit integer interval [lo, hi_excl) to the bitmap, it sets the corresponding bit (the position
+ * is relative to lo) of the bitmap added to one if the integer item is actually inserted, to zero otherwise. It returns 0 on success,
+ * <0 otherwise.
+ */
 int rbitmap32_add_range(struct rbitmap32 *r, uint32_t lo, uint32_t hi_excl, unsigned long *added) {
     unsigned long idx = 0;
     // the items in the range [lo, hi_excl) can reside in different containers, it is necessary
@@ -240,6 +245,7 @@ int rbitmap32_add_range(struct rbitmap32 *r, uint32_t lo, uint32_t hi_excl, unsi
         uint16_t n = last - lower_16_bits(lo) + 1;
         struct rcontainer *c = rcontainer_get_or_create(r, lo, n);
         mutex_lock(&c->lock);
+        // idx is the index of the bitmap added where to start writing
         int err = rcontainer_add_range_unlocked(c, lower_16_bits(lo), last, added, idx);
         mutex_unlock(&c->lock);
         if (err) {

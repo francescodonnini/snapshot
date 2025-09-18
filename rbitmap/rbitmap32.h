@@ -20,6 +20,10 @@ struct rcontainer {
     };
 };
 
+/**
+ * Roaring bitmap (32-bit) implementation, it implements only the insert operation because it is all I need to
+ * use.
+ */
 struct rbitmap32 {
     struct xarray containers;
 };
