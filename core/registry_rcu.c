@@ -476,7 +476,7 @@ static inline ssize_t length(struct snapshot_metadata *it) {
     size_t n = strlen(it->dev_name) + 1; // + length of " "
     struct session *s = it->session;
     if (s) {
-        n += get_dirname_len() + 1;
+        n += get_dirname_len() + 1; 
     } else {
         n += strlen("-\n");
     }
@@ -510,7 +510,7 @@ ssize_t registry_show_session(char *buf, size_t size) {
         br += sprintf(&buf[br], "%s ", it->dev_name);
         struct session *s = it->session;
         if (s) {
-            if (!get_dirname(it->dev_name, it->dev_name_len, &s->created_on, dirname, dirname_len)) {
+            if (!get_dirname(it->dev_name, it->dev_name_len, &s->created_on, dirname, dirname_len + 1)) {
                 br += sprintf(&buf[br], "%s\n", dirname);
             }
         } else {
