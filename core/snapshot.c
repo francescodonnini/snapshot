@@ -134,12 +134,15 @@ out:
 
 void snapshot_cleanup(void) {
     if (write_bio_wq) {
+        flush_workqueue(write_bio_wq);
         destroy_workqueue(write_bio_wq);
     }
     if (read_bio_wq) {
+        flush_workqueue(read_bio_wq);
         destroy_workqueue(read_bio_wq);
     }
     if (save_blocks_wq) {
+        flush_workqueue(save_blocks_wq);
         destroy_workqueue(save_blocks_wq);
     }
     snap_map_cleanup();
