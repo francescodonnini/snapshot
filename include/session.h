@@ -11,10 +11,11 @@ struct session {
     dev_t              dev;
     struct timespec64  created_on;
     struct maple_tree  tree;
-    char               id[];
 };
 
-int get_session_id_len(void);
+int get_dirname_prefix_len(void);
+
+int get_dirname_len(void);
 
 struct session *session_create(dev_t dev);
 

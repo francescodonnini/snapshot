@@ -291,14 +291,15 @@ static void snapshot_save(struct work_struct *work) {
     if (!w->p_data) {
         return;
     }
-    char *session = kzalloc(get_session_id_len() + 1, GFP_KERNEL);
-    if (!session) {
+    size_t dirname_len = get_dirname_len();
+    char *dirname = kzalloc(dirname_len + 1, GFP_KERNEL);
+    if (!dirname) {
         pr_err("out of memory");
         goto out;
     }
     struct bio_private_data *p_data = w->p_data;
     struct timespec64 session_created_on;
-    if (!registry_session_id(p_data->dev, &w->read_completed_on, session, &session_created_on)) {
+    if (!registry_session_id(p_data->dev, &w->read_completed_on, dirname, dirname_len + 1, &session_created_on)) {
         pr_err("snapshot_save: no session associated to device %d:%d", MAJOR(p_data->dev), MINOR(p_data->dev));
         goto free_session;
     }
@@ -315,7 +316,7 @@ static void snapshot_save(struct work_struct *work) {
         kfree(range);
     }
 
-    err = mkdir_session(session);
+    err = mkdir_session(dirname);
     if (err && err != -EEXIST) {
         goto free_session;
     }
@@ -330,26 +331,26 @@ static void snapshot_save(struct work_struct *work) {
     struct page_iter *pos;
     page_iter_for_each(pos, p_data) {
         struct block_work *b;
-        b = kzalloc(sizeof(*b) + get_session_id_len() + 1, GFP_KERNEL);
+        b = kzalloc(sizeof(*b) + get_dirname_len() + 1, GFP_KERNEL);
         if (!b) {
             pr_err("out of memory");
             break;
         }
         b->device = p_data->dev;
         b->sector = sector;
-        memcpy(b->session_id, session, get_session_id_len());
+        memcpy(b->session_id, dirname, get_dirname_len());
         memcpy(&b->session_created_on, &session_created_on, sizeof(session_created_on));
         memcpy(&b->data, pos, sizeof(*pos));
         INIT_WORK(&b->work, save_block);
         queue_work(save_blocks_wq, &b->work);
         sector += DIV_ROUND_UP(pos->len, 512);
     }
-    kfree(session);
+    kfree(dirname);
     kfree(w);
     return;
 
 free_session:
-    kfree(session);
+    kfree(dirname);
 out:
     bio_private_data_destroy(p_data);
     kfree(w);

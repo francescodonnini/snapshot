@@ -33,6 +33,7 @@ struct snapshot_metadata {
     // speed up searches by making string comparisons only on collisions or matches
     unsigned long     dev_name_hash; 
     char             *dev_name;
+    size_t            dev_name_len;
     struct session   *session;
     struct rcu_head   rcu;
 };
@@ -180,6 +181,7 @@ static inline struct snapshot_metadata *node_alloc(const char *name, gfp_t gfp) 
         return NULL;
     }
     strscpy(node->dev_name, name, n);
+    node->dev_name_len = n - 1;
     node->dev_name_hash = fast_hash(name);
     return node;
 }
@@ -310,6 +312,7 @@ int registry_session_prealloc(const char *dev_name, dev_t dev) {
     new_node->session = new_ssn;
     new_node->dev_name = current_node->dev_name;
     new_node->dev_name_hash = current_node->dev_name_hash;
+    new_node->dev_name_len = current_node->dev_name_len;
     list_replace_rcu(&current_node->list, &new_node->list);
     spin_unlock_irqrestore(&write_lock, flags);
 
@@ -326,19 +329,52 @@ release_lock:
 }
 
 /**
+ * tail copies to out the last n character of s, it replaces '/' with ':'
+ */
+static int tail(const char *s, size_t s_len, char *out, size_t out_len, size_t n) {
+    // tail should get at least n characters but s can be shorter than that
+    n = min_t(size_t, n, s_len);
+    char *occ = strrchr(s, '/');
+    if (occ && &s[s_len] - occ < n) {
+        return strscpy(out, occ + 1, out_len);
+    } else {
+        pr_warn("strange device name %s", s);
+        return strscpy(out, &s[s_len - n], out_len);
+    }
+    
+}
+
+static int get_dirname(const char *dev_name, size_t dev_name_len, struct timespec64 *created_on, char *out, size_t n) {
+    int tail_n = tail(dev_name, dev_name_len, out, n, get_dirname_prefix_len());
+    if (tail_n <= 0) {
+        pr_err("cannot write tail of %s to buffer", dev_name);
+        return -1;
+    }
+    if (snprintf(&out[tail_n], n - tail_n, ":%lld", created_on->tv_sec) >= n - tail_n)  {
+        return -1;
+    }
+    pr_info("dirname=%s", out);
+    return 0;
+}
+
+/**
  * registry_session_id returns true if there exists a session associated to device number dev and read_completed_on >= session creation date,
  * false otherwise.
  */
-bool registry_session_id(dev_t dev, struct timespec64 *read_completed_on, char *id, struct timespec64 *created_on) {
+bool registry_session_id(dev_t dev, struct timespec64 *read_completed_on, char *dirname, size_t n, struct timespec64 *created_on) {
     rcu_read_lock();
     bool found = false;
     struct snapshot_metadata *it = get_by_dev_and_time_ge_rcu(dev, read_completed_on);
     found = it != NULL;
     if (found) {
         struct session *s = it->session;
-        strncpy(id, s->id, get_session_id_len() + 1);
+        if (get_dirname(it->dev_name, it->dev_name_len, &s->created_on, dirname, n)) {
+            found = false;
+            goto out;
+        }
         memcpy(created_on, &s->created_on, sizeof(*created_on));
     }
+out:
     rcu_read_unlock();
     return found;
 }
@@ -367,6 +403,7 @@ void registry_session_destroy(dev_t dev) {
     
     new_node->dev_name = it->dev_name;
     new_node->dev_name_hash = it->dev_name_hash;
+    new_node->dev_name_len = it->dev_name_len;
     new_node->session = NULL;
 
     list_replace_rcu(&it->list, &new_node->list);
@@ -422,7 +459,7 @@ static inline ssize_t length(struct snapshot_metadata *it) {
     size_t n = strlen(it->dev_name) + 1; // + length of " "
     struct session *s = it->session;
     if (s) {
-        n += strlen(s->id) + 1;
+        n += get_dirname_len() + 1;
     } else {
         n += strlen("-\n");
     }
@@ -438,6 +475,11 @@ static inline ssize_t length(struct snapshot_metadata *it) {
  * EOF (if there is enough space to hold "EOF").
  */
 ssize_t registry_show_session(char *buf, size_t size) {
+    const int dirname_len = get_dirname_len();
+    char *dirname = kzalloc(dirname_len + 1, GFP_KERNEL);
+    if (!dirname) {
+        return -ENOMEM;
+    }
     rcu_read_lock();
     int err = 0;
     ssize_t br = 0;
@@ -451,7 +493,9 @@ ssize_t registry_show_session(char *buf, size_t size) {
         br += sprintf(&buf[br], "%s ", it->dev_name);
         struct session *s = it->session;
         if (s) {
-            br += sprintf(&buf[br], "%s\n", s->id);
+            if (!get_dirname(it->dev_name, it->dev_name_len, &s->created_on, dirname, dirname_len)) {
+                br += sprintf(&buf[br], "%s\n", dirname);
+            }
         } else {
             br += sprintf(&buf[br], "-\n");
         }
@@ -462,5 +506,6 @@ ssize_t registry_show_session(char *buf, size_t size) {
     } else if (!br) {
         br += sprintf(buf, "(no devices)\n");
     }
+    kfree(dirname);
     return br;
 }
