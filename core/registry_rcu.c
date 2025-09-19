@@ -341,7 +341,6 @@ static int tail(const char *s, size_t s_len, char *out, size_t out_len, size_t n
         pr_warn("strange device name %s", s);
         return strscpy(out, &s[s_len - n], out_len);
     }
-    
 }
 
 static int get_dirname(const char *dev_name, size_t dev_name_len, struct timespec64 *created_on, char *out, size_t n) {
