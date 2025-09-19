@@ -104,7 +104,7 @@ static bool skip_handler(struct bio *bio) {
  * 4. The write request should be eventually submitted to the bio layer so this kretprobe will intercept the bio request twice,
  *    and even the second time the latter is eligible to be intercepted so we need to keep track of the requests already intercepted.
  */
-int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs) {
+int submit_bio_pre_handler(struct kprobe *kp, struct pt_regs *regs) {
     struct bio *bio = get_arg1(struct bio*, regs);
     // skip the return handler if at least one of the following conditions apply:
     // * the request is NULL

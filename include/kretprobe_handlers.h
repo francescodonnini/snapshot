@@ -91,6 +91,6 @@ int singlefilefs_fill_super_entry_handler(struct kretprobe_instance *kp, struct 
 
 int singlefilefs_fill_super_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 
-int submit_bio_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
+int submit_bio_pre_handler(struct kprobe *kp, struct pt_regs *regs);
 
 #endif
