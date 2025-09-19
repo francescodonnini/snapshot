@@ -329,18 +329,33 @@ release_lock:
 }
 
 /**
- * tail copies to out the last n character of s, it replaces '/' with ':'
+ * tail copies to out the last n character of s or the last k < n characters until '/' is met.
+ * @s string to copy the characters from
+ * @s_len the length of s
+ * @out the buffer to write the character to
+ * @out_len the length of buffer (including NUL)
+ * 
+ * It returns the number of characters copied if successfull, <0 otherwise.
  */
 static int tail(const char *s, size_t s_len, char *out, size_t out_len, size_t n) {
+    char *occ = strrchr(s, '/');
+    if (occ && !occ[1]) {
+        pr_warn("malformed device name %s", s);
+        return -1;
+    }
     // tail should get at least n characters but s can be shorter than that
     n = min_t(size_t, n, s_len);
-    char *occ = strrchr(s, '/');
-    if (occ && &s[s_len] - occ < n) {
-        return strscpy(out, occ + 1, out_len);
+    if (occ) {
+        // '/' is not included in the directory name
+        ++occ;
+        size_t k = &s[s_len] - occ;
+        if (k < n) {
+            return strscpy(out, occ, out_len);
+        }
     } else {
         pr_warn("strange device name %s", s);
-        return strscpy(out, &s[s_len - n], out_len);
     }
+    return strscpy(out, &s[s_len - n], out_len);
 }
 
 static int get_dirname(const char *dev_name, size_t dev_name_len, struct timespec64 *created_on, char *out, size_t n) {
