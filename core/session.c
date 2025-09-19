@@ -3,12 +3,17 @@
 #include "pr_format.h"
 #include <linux/slab.h>
 
+static const int PREFIX_LEN = 11;
+
+static const int DIRNAME_LEN = PREFIX_LEN
+    + strlen("@dd-MM-yyyyThh:mm:ss.nnnnnnnnn");
+
 int get_dirname_prefix_len(void) {
-    return 11;
+    return PREFIX_LEN;
 }
 
 int get_dirname_len(void) {
-    return 32;
+    return DIRNAME_LEN;
 }
 
 struct session *session_create(dev_t dev) {
@@ -17,7 +22,7 @@ struct session *session_create(dev_t dev) {
     if (!s) {
         return NULL;
     }
-    ktime_get_ts64(&s->created_on);
+    ktime_get_real_ts64(&s->created_on);
     if (itree_create(s)) {
         goto out;
     }

@@ -365,7 +365,7 @@ static void read_bio_enqueue(struct bio *orig_bio, struct bio_private_data *p_da
     }
     w->orig_bio = orig_bio;
     w->p_data = p_data;
-    ktime_get_ts64(&w->read_completed_on);
+    ktime_get_real_ts64(&w->read_completed_on);
     INIT_WORK(&w->work, snapshot_save);
     queue_work(read_bio_wq, &w->work);
 }
