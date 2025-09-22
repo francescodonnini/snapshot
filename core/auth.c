@@ -38,7 +38,7 @@ int auth_set_password(const char *password) {
         return -EINVAL;
     }
     size_t n = strnlen(password, PASSWD_MAX);
-    if (n == PASSWD_MAX) {
+    if (n == 0 || n == PASSWD_MAX) {
         pr_err("password too long");
         return -EINVAL;
     }

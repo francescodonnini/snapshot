@@ -364,10 +364,13 @@ static int get_dirname(const char *dev_name, size_t dev_name_len, struct timespe
         pr_err("cannot write tail of %s to buffer", dev_name);
         return -1;
     }
-    if (snprintf(&out[tail_n], n - tail_n, ":%lld", created_on->tv_sec) >= n - tail_n)  {
-        return -1;
-    }
-    pr_info("dirname=%s", out);
+    struct tm tm;
+    time64_to_tm(created_on->tv_sec, 0, &tm);
+    scnprintf(&out[tail_n], n - tail_n,
+              "%04ld-%02d-%02dT%02d:%02d:%02d.%09ld",
+              tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+              tm.tm_hour, tm.tm_min, tm.tm_sec,
+              created_on->tv_nsec);
     return 0;
 }
 
@@ -473,7 +476,7 @@ static inline ssize_t length(struct snapshot_metadata *it) {
     size_t n = strlen(it->dev_name) + 1; // + length of " "
     struct session *s = it->session;
     if (s) {
-        n += get_dirname_len() + 1;
+        n += get_dirname_len() + 1; 
     } else {
         n += strlen("-\n");
     }
@@ -507,7 +510,7 @@ ssize_t registry_show_session(char *buf, size_t size) {
         br += sprintf(&buf[br], "%s ", it->dev_name);
         struct session *s = it->session;
         if (s) {
-            if (!get_dirname(it->dev_name, it->dev_name_len, &s->created_on, dirname, dirname_len)) {
+            if (!get_dirname(it->dev_name, it->dev_name_len, &s->created_on, dirname, dirname_len + 1)) {
                 br += sprintf(&buf[br], "%s\n", dirname);
             }
         } else {
