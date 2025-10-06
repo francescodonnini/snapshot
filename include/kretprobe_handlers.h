@@ -83,10 +83,6 @@ int kill_block_super_entry_handler(struct kretprobe_instance *kp, struct pt_regs
 
 int kill_block_super_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 
-int mount_bdev_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
-
-int mount_bdev_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
-
 int singlefilefs_fill_super_entry_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
 
 int singlefilefs_fill_super_handler(struct kretprobe_instance *kp, struct pt_regs *regs);
