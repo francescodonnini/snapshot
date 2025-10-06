@@ -1,10 +1,10 @@
+#include "snapshot.h"
+#include "../rbitmap/rbitmap32.h"
 #include "bio.h"
 #include "itree.h"
 #include "pr_format.h"
 #include "registry.h"
 #include "small_bitmap.h"
-#include "snap_map.h"
-#include "snapshot.h"
 #include <linux/bio.h>
 #include <linux/bitmap.h>
 #include <linux/blkdev.h>
@@ -19,6 +19,30 @@
 #include <linux/workqueue.h>
 #define MAX_NAME_LEN (20)
 #define ROOT_DIR     "/snapshots"
+
+/**
+ * Little auxiliary struct that represents the header of each block saved in the data file
+ * of a snapshot.
+ */
+struct snap_block_header {
+    sector_t      sector;
+    unsigned long offset;
+    unsigned long nbytes;
+};
+
+/**
+ * This struct keeps track of the sectors of a certain device which have been already saved by the module.
+ * A snap_map is uniquely identified by the pair device number and session_created_on. It uses srcu because
+ * the operations provided by rbitmap32 may block.
+ */
+struct snap_map {
+    struct callback_head  head;
+    struct list_head      list;
+    dev_t                 device;
+    struct timespec64     session_created_on;
+    struct rbitmap32      bitmap;
+    struct file          *f_data;
+};
 
 struct write_bio_work {
     struct work_struct  work;
@@ -41,8 +65,16 @@ struct block_work {
     char               session_id[];
 };
 
+static LIST_HEAD(map_list);
+
+static DEFINE_SPINLOCK(write_lock);
+
+static struct srcu_struct srcu;
+
 struct workqueue_struct *write_bio_wq;
+
 struct workqueue_struct *read_bio_wq;
+
 struct workqueue_struct *save_blocks_wq;
 
 /**
@@ -97,6 +129,11 @@ out_unlock_put:
     return err;
 }
 
+static int snap_map_init(void) {
+    init_srcu_struct(&srcu);
+    return 0;
+}
+
 int snapshot_init(void) {
     int err = snap_map_init();
     if (err) {
@@ -132,6 +169,20 @@ out:
     return err;
 }
 
+static void snap_map_cleanup(void) {
+    LIST_HEAD(list);
+    spin_lock(&write_lock);
+    list_splice_init(&map_list, &list);
+    spin_unlock(&write_lock);
+    synchronize_srcu(&srcu);
+    struct snap_map *pos, *tmp;
+    list_for_each_entry_safe(pos, tmp, &list, list) {
+        rbitmap32_destroy(&pos->bitmap);
+        kfree(pos);
+    }
+    cleanup_srcu_struct(&srcu);
+}
+
 void snapshot_cleanup(void) {
     if (write_bio_wq) {
         flush_workqueue(write_bio_wq);
@@ -146,34 +197,6 @@ void snapshot_cleanup(void) {
         destroy_workqueue(save_blocks_wq);
     }
     snap_map_cleanup();
-}
-
-/**
- * file_write writes a region of a page (pointed by he page_iter struct) delimited by [offset, offset + nbytes).
- * It fails if the file already exists (some other thread has already written the data) or if it isn't possible
- * to create or write to the file.
- */
-static void file_write(const char *path, struct page_iter *it, unsigned long offset, unsigned long nbytes) {    
-    struct file *fp = filp_open(path, O_CREAT | O_EXCL | O_WRONLY, 0644);
-    if (IS_ERR(fp)) {
-        pr_err("cannot open file: %s, got error %ld", path, PTR_ERR(fp));
-        return;
-    }
-    if (offset + nbytes > it->offset + it->len) {
-        pr_err("write to %s failed: lo=%lu + #B=%lu > off=%u + len=%u", path, offset, nbytes, it->offset, it->len);
-        goto out;
-    }
-    void *va = page_address(it->page);
-    loff_t off = 0;
-    ssize_t n = kernel_write(fp, va + offset, nbytes, &off);
-    if (n != nbytes) {
-        pr_err("kernel_write failed to write whole page at %s", path);
-    }
-out:
-    int err = filp_close(fp, NULL);
-    if (err) {
-        pr_err("filp_close failed to close file at %s, got error %d", path, err);
-    }
 }
 
 /**
@@ -228,6 +251,72 @@ out_unlock_put:
     return err;
 }
 
+static inline void free_all_pages(struct bio_private_data *p_data) {
+    struct page_iter *pos;
+    page_iter_for_each(pos, p_data) {
+        __free_pages(pos->page, get_order(pos->len));
+    }
+}
+
+static void bio_private_data_destroy(struct bio_private_data *p_data) {
+    free_all_pages(p_data);
+    kfree(p_data);
+}
+
+static void snap_map_destroy_srcu(struct callback_head *head) {
+    struct snap_map *p = container_of(head, struct snap_map, head);
+    rbitmap32_destroy(&p->bitmap);
+    filp_close(p->f_data, NULL);
+    kfree(p);
+}
+
+void snap_map_destroy(dev_t dev, struct timespec64 *created_on) {
+    unsigned long flags;
+    spin_lock_irqsave(&write_lock, flags);
+    bool found;
+    struct snap_map *pos;
+    list_for_each_entry(pos, &map_list, list) {
+        found = pos->device == dev && timespec64_equal(&pos->session_created_on, created_on);
+        if (found) {
+            list_del_rcu(&pos->list);
+            break;
+        }
+    }
+    spin_unlock_irqrestore(&write_lock, flags);
+    if (found) {
+        call_srcu(&srcu, &pos->head, snap_map_destroy_srcu);
+    }
+}
+
+static void snap_map_write(struct snap_map *map, struct page_iter *it, struct snap_block_header *header) {
+    if (header->offset + header->nbytes > it->offset + it->len) {
+        return;
+    }
+    inode_lock(file_inode(map->f_data));
+    ssize_t n = kernel_write(map->f_data, header, sizeof(*header), &(map->f_data->f_pos));
+    if (n != sizeof(*header)) {
+        pr_err("kernel_write failed to write index of device %d:%d", MAJOR(map->device), MINOR(map->device));
+        goto out;
+    }
+    void *va = page_address(it->page);
+    n = kernel_write(map->f_data, va + header->offset, header->nbytes, &(map->f_data->f_pos));
+    if (n != header->nbytes) {
+        pr_err("kernel_write failed to write whole page of device %d:%d", MAJOR(map->device), MINOR(map->device));
+    }
+out:
+    inode_unlock(file_inode(map->f_data));
+}
+
+static struct snap_map *snap_map_lookup_srcu(dev_t dev, struct timespec64 *created_on) {
+    struct snap_map *pos;
+    list_for_each_entry_srcu(pos, &map_list, list, srcu_read_lock_held(&srcu)) {
+        if (pos->device == dev && timespec64_equal(&pos->session_created_on, created_on)) {
+            return pos;
+        }
+    }
+    return NULL;
+}
+
 static void save_block(struct work_struct *work) {
     struct block_work *w = container_of(work, struct block_work, work);
     size_t path_len = strlen(ROOT_DIR) + strlen(w->session_id) + MAX_NAME_LEN + 3;
@@ -242,26 +331,40 @@ static void save_block(struct work_struct *work) {
     }
     
     unsigned long sectors_num = DIV_ROUND_UP(w->data.len, 512);
-    struct small_bitmap map;
-    unsigned long *added = small_bitmap_zeros(&map, sectors_num);
+    struct small_bitmap s_map;
+    unsigned long *added = small_bitmap_zeros(&s_map, sectors_num);
     if (!added) {
         goto free_data;
     }
     
-    int err = snap_map_add_range(w->device, &w->session_created_on, w->sector, w->sector + sectors_num, added);
+    int rdx = srcu_read_lock(&srcu);
+    struct snap_map *map = snap_map_lookup_srcu(w->device, &w->session_created_on);
+    if (!map) {
+        goto no_map;
+    }
+    unsigned long lo = w->sector;
+    unsigned long hi_excl = w->sector + sectors_num;
+    int err = rbitmap32_add_range(&map->bitmap, lo, hi_excl, added);
     if (err) {
-        pr_err("cannot add range [%llu, %llu) to bitmap, got error %d", w->sector, w->sector + sectors_num, err);
+        pr_err("cannot add range [%lu, %lu) to bitmap, got error %d", lo, hi_excl, err);
         goto free_data;
     }
     
-    unsigned long lo = 0, hi;
-    while (small_bitmap_next_set_region(&map, &lo, &hi)) {
-        sprintf(path, "%s/%s/%llu", ROOT_DIR, w->session_id, w->sector + lo);
-        file_write(path, &w->data, w->data.offset + lo, (hi - lo) * 512);
+    lo = 0;
+    unsigned long hi;
+    while (small_bitmap_next_set_region(&s_map, &lo, &hi)) {
+        struct snap_block_header header = {
+            .sector = w->sector + lo,
+            .offset = w->data.offset + lo,
+            .nbytes = (hi - lo) * 512
+        };
+        snap_map_write(map, &w->data, &header);
         lo = hi;
     }
-    
-    small_bitmap_free(&map);
+
+no_map:
+    srcu_read_unlock(&srcu, rdx);
+    small_bitmap_free(&s_map);
 free_data:
     __free_pages(w->data.page, get_order(w->data.len));
     kfree(path);
@@ -269,16 +372,87 @@ out:
     kfree(w);
 }
 
-static inline void free_all_pages(struct bio_private_data *p_data) {
-    struct page_iter *pos;
-    page_iter_for_each(pos, p_data) {
-        __free_pages(pos->page, get_order(pos->len));
+
+static struct file* try_create_file(const char *session_id, const char *name) {
+    size_t len = strlen(ROOT_DIR) + strlen(session_id) + strlen(name) + 3;
+    if (len > PATH_MAX) {
+        return ERR_PTR(-ENAMETOOLONG);
     }
+    char *path = kzalloc(len, GFP_KERNEL);
+    if (!path) {
+        return ERR_PTR(-ENOMEM);
+    }
+    sprintf(path, "%s/%s/%s", ROOT_DIR, session_id, name);
+    struct file *fp = filp_open(path, O_CREAT | O_EXCL | O_APPEND, 0600);
+    kfree(path);
+    if (IS_ERR(fp)) {
+        return fp;
+    }
+    return 0;
 }
 
-static void bio_private_data_destroy(struct bio_private_data *p_data) {
-    free_all_pages(p_data);
-    kfree(p_data);
+static struct snap_map* snap_map_alloc(const char *session_id, dev_t dev, struct timespec64 *created_on) {
+    struct snap_map *map;
+    map = kzalloc(sizeof(*map), GFP_KERNEL);
+    if (!map) {
+        return NULL;
+    }
+    map->device = dev;
+    memcpy(&map->session_created_on, created_on, sizeof(struct timespec64));
+    int err = rbitmap32_init(&map->bitmap);
+    if (err) {
+        goto out;
+    }
+    struct file *f_data = try_create_file(session_id, "data");
+    if (IS_ERR(f_data)) {
+        goto out2;
+    }
+    map->f_data = f_data;
+    return map;
+
+out2:
+    rbitmap32_destroy(&map->bitmap);
+out:
+    kfree(map);
+    return NULL;
+}
+
+static int try_snap_map_create(const char *session_id, dev_t dev, struct timespec64 *created_on) {
+    bool found = false;
+    struct snap_map *map = snap_map_alloc(session_id, dev, created_on);
+    spin_lock(&write_lock);
+    struct snap_map *pos;
+    list_for_each_entry(pos, &map_list, list) {
+        found = pos->device == dev && timespec64_equal(&pos->session_created_on, created_on);
+        if (found) {
+            break;
+        }
+    }
+    if (!found) {
+        list_add_rcu(&map->list, &map_list);
+    }
+    spin_unlock(&write_lock);
+    if (found) {
+        kfree(map);
+        return -EEXIST;
+    }
+    return 0;
+}
+
+/**
+ * snap_map_create searches whether a bitmap associated with a device number and certain date (the date when a session
+ * has been creted) exists, if a bitmap doesn't exist, then a new one is created. It returns 0 if a new bitmap has been created,
+ * -EEXIST if a bitmap already exists, <0 otherwise. 
+ */
+static int snap_map_create(const char *session_id, dev_t dev, struct timespec64 *created_on) {
+    int rdx = srcu_read_lock(&srcu);
+    struct snap_map *map = snap_map_lookup_srcu(dev, created_on);
+    if (map) {
+        srcu_read_unlock(&srcu, rdx);
+        return -EEXIST;
+    }
+    srcu_read_unlock(&srcu, rdx);
+    return try_snap_map_create(session_id, dev, created_on);
 }
 
 /**
@@ -321,7 +495,7 @@ static void snapshot_save(struct work_struct *work) {
         goto free_session;
     }
 
-    err = snap_map_create(p_data->dev, &session_created_on);
+    err = snap_map_create(dirname, p_data->dev, &session_created_on);
     if (err && err != -EEXIST) {
         pr_err("cannot create bitmap, got error %d", err);
         goto free_session;

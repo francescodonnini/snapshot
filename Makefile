@@ -10,7 +10,6 @@ snapshot-objs := 	core/activate_snapshot.o \
 					core/registry_rcu.o \
 					core/itree_rcu.o \
 					core/session.o \
-					core/snap_map.o \
 					core/snapshot.o \
 					devices/bnull.o \
 					devices/chrdev_ioctl.o \

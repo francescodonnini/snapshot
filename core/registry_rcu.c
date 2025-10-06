@@ -4,7 +4,6 @@
 #include "itree.h"
 #include "pr_format.h"
 #include "session.h"
-#include "snap_map.h"
 #include "snapshot.h"
 #include <linux/blkdev.h>
 #include <linux/list.h>

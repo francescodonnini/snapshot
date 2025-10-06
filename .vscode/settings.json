@@ -96,7 +96,8 @@
         "b_range.h": "c",
         "xarray.h": "c",
         "bitops.h": "c",
-        "bitset16.h": "c"
+        "bitset16.h": "c",
+        "mutex.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
     "makefile.configureOnOpen": true,

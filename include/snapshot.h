@@ -9,6 +9,8 @@ int snapshot_init(void);
 
 void snapshot_cleanup(void);
 
+void snap_map_destroy(dev_t dev, struct timespec64 *created_on);
+
 int write_bio_enqueue(struct bio *bio);
 
 #endif
