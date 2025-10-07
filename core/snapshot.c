@@ -175,8 +175,7 @@ static void snap_map_cleanup(void) {
     synchronize_srcu(&srcu);
     struct snap_map *pos, *tmp;
     list_for_each_entry_safe(pos, tmp, &list, list) {
-        rbitmap32_destroy(&pos->bitmap);
-        kfree(pos);
+        snap_map_free(pos);
     }
     cleanup_srcu_struct(&srcu);
 }
@@ -292,6 +291,7 @@ void snap_map_destroy(dev_t dev, struct timespec64 *created_on) {
 
 static void snap_map_write(struct snap_map *map, struct page_iter *it, unsigned long offset, unsigned long nbytes, sector_t sector) {
     if (offset + nbytes > it->offset + it->len) {
+        pr_err("%lu + %lu > %u + %u", offset, nbytes, it->offset, it->len);
         return;
     }
     inode_lock(file_inode(map->f_data));
