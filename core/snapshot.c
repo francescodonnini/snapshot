@@ -296,7 +296,6 @@ static void snap_map_write(struct snap_map *map, struct page_iter *it, unsigned 
         pr_err("%lu + %lu > %u + %u", offset, nbytes, it->offset, it->len);
         return;
     }
-    pr_info("write(dev=%d:%d, sector=%llu, offset=%lu, nbytes=%lu)", MAJOR(map->device), MINOR(map->device), sector, offset, nbytes);
     mutex_lock(&map->f_lock);
     struct snap_block_header header = { .sector = sector, .nbytes = nbytes };
     ssize_t n = kernel_write(map->f_data, &header, sizeof(header), &(map->f_data->f_pos));
