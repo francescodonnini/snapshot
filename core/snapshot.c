@@ -293,14 +293,14 @@ static void snap_map_write(struct snap_map *map, struct page_iter *it, unsigned 
     }
     inode_lock(file_inode(map->f_data));
     struct snap_block_header header = { .sector = sector, .nbytes = nbytes };
-    ssize_t n = kernel_write(map->f_data, header, sizeof(header), &(map->f_data->f_pos));
-    if (n != sizeof(*header)) {
+    ssize_t n = kernel_write(map->f_data, &header, sizeof(header), &(map->f_data->f_pos));
+    if (n != sizeof(header)) {
         pr_err("kernel_write failed to write index of device %d:%d", MAJOR(map->device), MINOR(map->device));
         goto out;
     }
     void *va = page_address(it->page);
     n = kernel_write(map->f_data, va + offset, nbytes, &(map->f_data->f_pos));
-    if (n != header->nbytes) {
+    if (n != nbytes) {
         pr_err("kernel_write failed to write whole page of device %d:%d", MAJOR(map->device), MINOR(map->device));
     }
 out:
