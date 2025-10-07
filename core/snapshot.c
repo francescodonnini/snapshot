@@ -76,6 +76,8 @@ struct workqueue_struct *read_bio_wq;
 
 struct workqueue_struct *save_blocks_wq;
 
+static struct dentry *root_dentry;
+
 /**
  * mkdir_snapshots creates the directory /snapshots if it doesn't exist. It returns 0 on success or if it already exists,
  * <0 otherwise.
@@ -230,7 +232,6 @@ static int mkdir_session(const char *session) {
     }
     
     if (d_really_is_positive(dentry)) {
-        pr_debug(pr_format("%s/%s already exists"), ROOT_DIR, session);
         dput(dentry);
         goto out_unlock_put;
     }
