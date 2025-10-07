@@ -133,9 +133,10 @@ int main(int argc, char *argv[]) {
                 perror(args.s1);
                 exit(-errno);
             }
+            printf("%s\n", path);
             struct ioctl_params params = {
                 .path = path,
-                .path_len = strlen(args.s1),
+                .path_len = strlen(path),
                 .password = args.s2,
                 .password_len = strlen(args.s2),
             };
