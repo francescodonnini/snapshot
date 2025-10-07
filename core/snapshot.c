@@ -39,6 +39,7 @@ struct snap_map {
     dev_t                 device;
     struct timespec64     session_created_on;
     struct rbitmap32      bitmap;
+    struct mutex          f_lock;
     struct file          *f_data;
 };
 
@@ -167,6 +168,13 @@ out:
     return err;
 }
 
+static void snap_map_free(struct snap_map *map) {
+    rbitmap32_destroy(&map->bitmap);
+    filp_close(map->f_data, NULL);
+    mutex_destroy(&map->f_lock);
+    kfree(map);
+}
+
 static void snap_map_cleanup(void) {
     LIST_HEAD(list);
     spin_lock(&write_lock);
@@ -260,12 +268,6 @@ static void bio_private_data_destroy(struct bio_private_data *p_data) {
     kfree(p_data);
 }
 
-static void snap_map_free(struct snap_map *map) {
-    rbitmap32_destroy(&map->bitmap);
-    filp_close(map->f_data, NULL);
-    kfree(map);
-}
-
 static void snap_map_destroy_srcu(struct callback_head *head) {
     struct snap_map *p = container_of(head, struct snap_map, head);
     snap_map_free(p);
@@ -294,7 +296,8 @@ static void snap_map_write(struct snap_map *map, struct page_iter *it, unsigned 
         pr_err("%lu + %lu > %u + %u", offset, nbytes, it->offset, it->len);
         return;
     }
-    inode_lock(file_inode(map->f_data));
+    pr_info("write(dev=%d:%d, sector=%llu, offset=%lu, nbytes=%lu)", MAJOR(map->device), MINOR(map->device), sector, offset, nbytes);
+    mutex_lock(&map->f_lock);
     struct snap_block_header header = { .sector = sector, .nbytes = nbytes };
     ssize_t n = kernel_write(map->f_data, &header, sizeof(header), &(map->f_data->f_pos));
     if (n != sizeof(header)) {
@@ -307,7 +310,7 @@ static void snap_map_write(struct snap_map *map, struct page_iter *it, unsigned 
         pr_err("kernel_write failed to write whole page of device %d:%d", MAJOR(map->device), MINOR(map->device));
     }
 out:
-    inode_unlock(file_inode(map->f_data));
+    mutex_unlock(&map->f_lock);
 }
 
 static struct snap_map *snap_map_lookup_srcu(dev_t dev, struct timespec64 *created_on) {
@@ -393,6 +396,7 @@ static struct snap_map* snap_map_alloc(const char *session_id, dev_t dev, struct
         goto out2;
     }
     map->f_data = f_data;
+    mutex_init(&map->f_lock);
     return map;
 
 out2:
