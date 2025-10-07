@@ -18,7 +18,6 @@
 #include <linux/version.h>
 #include <linux/workqueue.h>
 #define ROOT_DIR  "/snapshots"
-#define FILE_NAME "data"
 
 /**
  * Little auxiliary struct that represents the header of each block saved in the data file
