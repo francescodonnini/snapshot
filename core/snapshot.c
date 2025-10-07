@@ -364,12 +364,12 @@ static struct file* try_create_file(const char *session_id, const char *name) {
         return ERR_PTR(-ENOMEM);
     }
     sprintf(path, "%s/%s/%s", ROOT_DIR, session_id, name);
-    struct file *fp = filp_open(path, O_CREAT | O_EXCL | O_APPEND, 0600);
-    kfree(path);
+    struct file *fp = filp_open(path, O_CREAT | O_WRONLY | O_APPEND, 0600);
     if (IS_ERR(fp)) {
-        return fp;
+        pr_err("cannot open file %s, got error %ld (%s)", path, PTR_ERR(fp), errtoa(PTR_ERR(fp)));
     }
-    return 0;
+    kfree(path);
+    return fp;
 }
 
 static struct snap_map* snap_map_alloc(const char *session_id, dev_t dev, struct timespec64 *created_on) {
@@ -401,6 +401,9 @@ out:
 static int try_snap_map_create(const char *session_id, dev_t dev, struct timespec64 *created_on) {
     bool found = false;
     struct snap_map *map = snap_map_alloc(session_id, dev, created_on);
+    if (!map) {
+        return -ENOMEM;
+    }
     spin_lock(&write_lock);
     struct snap_map *pos;
     list_for_each_entry(pos, &map_list, list) {
