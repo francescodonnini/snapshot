@@ -319,35 +319,24 @@ static struct snap_map *snap_map_lookup_srcu(dev_t dev, struct timespec64 *creat
 
 static void save_block(struct work_struct *work) {
     struct block_work *w = container_of(work, struct block_work, work);
-    size_t path_len = strlen(ROOT_DIR) + strlen(w->session_id) + strlen(FILE_NAME) + 3;
-    if (path_len > PATH_MAX) {
-        goto out;
-    }
-
-    char *path = kzalloc(path_len, GFP_KERNEL);
-    if (!path) {
-        pr_err("out of memory");
-        goto out;
-    }
-    
     unsigned long sectors_num = DIV_ROUND_UP(w->data.len, 512);
     struct small_bitmap s_map;
     unsigned long *added = small_bitmap_zeros(&s_map, sectors_num);
     if (!added) {
-        goto free_data;
+        goto out;
     }
     
     int rdx = srcu_read_lock(&srcu);
     struct snap_map *map = snap_map_lookup_srcu(w->device, &w->session_created_on);
     if (!map) {
-        goto no_map;
+        goto out2;
     }
     unsigned long lo = w->sector;
     unsigned long hi_excl = w->sector + sectors_num;
     int err = rbitmap32_add_range(&map->bitmap, lo, hi_excl, added);
     if (err) {
         pr_err("cannot add range [%lu, %lu) to bitmap, got error %d", lo, hi_excl, err);
-        goto free_data;
+        goto out2;
     }
     
     lo = 0;
@@ -357,13 +346,11 @@ static void save_block(struct work_struct *work) {
         lo = hi;
     }
 
-no_map:
+out2:
     srcu_read_unlock(&srcu, rdx);
     small_bitmap_free(&s_map);
-free_data:
-    __free_pages(w->data.page, get_order(w->data.len));
-    kfree(path);
 out:
+    __free_pages(w->data.page, get_order(w->data.len));
     kfree(w);
 }
 
