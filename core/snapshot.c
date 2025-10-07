@@ -261,11 +261,15 @@ static void bio_private_data_destroy(struct bio_private_data *p_data) {
     kfree(p_data);
 }
 
+static void snap_map_free(struct snap_map *map) {
+    rbitmap32_destroy(&map->bitmap);
+    filp_close(map->f_data, NULL);
+    kfree(map);
+}
+
 static void snap_map_destroy_srcu(struct callback_head *head) {
     struct snap_map *p = container_of(head, struct snap_map, head);
-    rbitmap32_destroy(&p->bitmap);
-    filp_close(p->f_data, NULL);
-    kfree(p);
+    snap_map_free(p);
 }
 
 void snap_map_destroy(dev_t dev, struct timespec64 *created_on) {
@@ -417,7 +421,7 @@ static int try_snap_map_create(const char *session_id, dev_t dev, struct timespe
     }
     spin_unlock(&write_lock);
     if (found) {
-        kfree(map);
+        snap_map_free(map);
         return -EEXIST;
     }
     return 0;
