@@ -296,7 +296,6 @@ static void snap_map_write(struct snap_map *map, struct page_iter *it, unsigned 
         pr_err("%lu + %lu > %u + %u", offset, nbytes, it->offset, it->len);
         return;
     }
-    pr_info("write(dev=%d:%d, sector=%llu, offset=%lu, nbytes=%lu)", MAJOR(map->device), MINOR(map->device), sector, offset, nbytes);
     mutex_lock(&map->f_lock);
     struct snap_block_header header = { .sector = sector, .nbytes = nbytes };
     ssize_t n = kernel_write(map->f_data, &header, sizeof(header), &(map->f_data->f_pos));
@@ -304,7 +303,7 @@ static void snap_map_write(struct snap_map *map, struct page_iter *it, unsigned 
         pr_err("kernel_write failed to write index of device %d:%d", MAJOR(map->device), MINOR(map->device));
         goto out;
     }
-    void *va = page_address(it->page);
+    void *va = page_address(it->page) + it->offset;
     n = kernel_write(map->f_data, va + offset, nbytes, &(map->f_data->f_pos));
     if (n != nbytes) {
         pr_err("kernel_write failed to write whole page of device %d:%d", MAJOR(map->device), MINOR(map->device));
@@ -641,6 +640,7 @@ no_bio:
 static void process_bio(struct work_struct *work) {
     struct write_bio_work *w = container_of(work, struct write_bio_work, work);
     struct bio *orig_bio = w->orig_bio;
+    pr_info("processing bio %llu #%u B", orig_bio->bi_iter.bi_sector, orig_bio->bi_iter.bi_size);
     struct bio *read_bio = create_read_bio(orig_bio);
     if (read_bio) {
         submit_bio(read_bio);
