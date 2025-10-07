@@ -139,15 +139,7 @@ int main(int argc, char *argv[]) {
             ls();
             break;
         case RESTORE_SNP:
-            char *path = malloc(4096);
-            if (!path) {
-                perror("out of memory");
-                exit(-ENOMEM);
-            }
-            char *p[] = {path, NULL};
-            snprintf(path, 4096, "/snapshots/%s", args.s2);
-            err = restore_snapshot(args.s1, p);
-            free(path);
+            err = restore_snapshot(args.s1, args.s2);
             break;
         default:
             break;
