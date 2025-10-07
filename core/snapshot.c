@@ -17,8 +17,8 @@
 #include <linux/time64.h>
 #include <linux/version.h>
 #include <linux/workqueue.h>
-#define MAX_NAME_LEN (20)
-#define ROOT_DIR     "/snapshots"
+#define ROOT_DIR  "/snapshots"
+#define FILE_NAME "data"
 
 /**
  * Little auxiliary struct that represents the header of each block saved in the data file
@@ -26,7 +26,6 @@
  */
 struct snap_block_header {
     sector_t      sector;
-    unsigned long offset;
     unsigned long nbytes;
 };
 
@@ -288,18 +287,19 @@ void snap_map_destroy(dev_t dev, struct timespec64 *created_on) {
     }
 }
 
-static void snap_map_write(struct snap_map *map, struct page_iter *it, struct snap_block_header *header) {
-    if (header->offset + header->nbytes > it->offset + it->len) {
+static void snap_map_write(struct snap_map *map, struct page_iter *it, unsigned long offset, unsigned long nbytes, sector_t sector) {
+    if (offset + nbytes > it->offset + it->len) {
         return;
     }
     inode_lock(file_inode(map->f_data));
-    ssize_t n = kernel_write(map->f_data, header, sizeof(*header), &(map->f_data->f_pos));
+    struct snap_block_header header = { .sector = sector, .nbytes = nbytes };
+    ssize_t n = kernel_write(map->f_data, header, sizeof(header), &(map->f_data->f_pos));
     if (n != sizeof(*header)) {
         pr_err("kernel_write failed to write index of device %d:%d", MAJOR(map->device), MINOR(map->device));
         goto out;
     }
     void *va = page_address(it->page);
-    n = kernel_write(map->f_data, va + header->offset, header->nbytes, &(map->f_data->f_pos));
+    n = kernel_write(map->f_data, va + offset, nbytes, &(map->f_data->f_pos));
     if (n != header->nbytes) {
         pr_err("kernel_write failed to write whole page of device %d:%d", MAJOR(map->device), MINOR(map->device));
     }
@@ -319,7 +319,7 @@ static struct snap_map *snap_map_lookup_srcu(dev_t dev, struct timespec64 *creat
 
 static void save_block(struct work_struct *work) {
     struct block_work *w = container_of(work, struct block_work, work);
-    size_t path_len = strlen(ROOT_DIR) + strlen(w->session_id) + MAX_NAME_LEN + 3;
+    size_t path_len = strlen(ROOT_DIR) + strlen(w->session_id) + strlen(FILE_NAME) + 3;
     if (path_len > PATH_MAX) {
         goto out;
     }
@@ -353,12 +353,7 @@ static void save_block(struct work_struct *work) {
     lo = 0;
     unsigned long hi;
     while (small_bitmap_next_set_region(&s_map, &lo, &hi)) {
-        struct snap_block_header header = {
-            .sector = w->sector + lo,
-            .offset = w->data.offset + lo,
-            .nbytes = (hi - lo) * 512
-        };
-        snap_map_write(map, &w->data, &header);
+        snap_map_write(map, &w->data, lo * 512, (hi - lo) * 512, w->sector +  lo);
         lo = hi;
     }
 
