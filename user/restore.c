@@ -5,104 +5,84 @@
 #include <string.h>
 #include <fts.h>
 
-static int dd(FILE *off, FTSENT *p) {
-    unsigned long sector = strtoul(p->fts_name, NULL, 10);
-    if (!sector && errno) {
-        fprintf(stderr, "cannot convert file name %s to number, got error %d", p->fts_name, errno);
-        return -errno;
-    }
-    FILE* iff = fopen(p->fts_path, "r");
-    if (!iff) {
-        int err = ferror(iff);
-        fprintf(stderr, "cannot open file %s got error", p->fts_path, err);
-        return err;
-    }
+struct snap_header {
+    unsigned long sector;
+    unsigned long nbytes;
+};
 
-    int err = fseek(iff, 0, SEEK_END);
-    if (err) {
-        perror("fseek failed");
-        goto out;
-    }
-    long size = ftell(iff);
-    err = fseek(iff, 0, SEEK_SET);
-    if (err) {
-        perror("fseek failed");
-        goto out;
-    }
-    char *block = malloc(size);
-    if (!block) {
-        perror("out of memory");
-        err = -ENOMEM;
-        goto out2;
-    }
-    size_t n = fread(block, 1, size, iff);
-    if (n < size) {
-        if (feof(iff)) {
-            perror("EOF met too early");
-            err = EOF;
-        } else {
-            err = ferror(iff);
-            fprintf(stderr, "fread failed, got error %d", err);
-        }
-        goto out2;
-    }
-    off_t offset = sector * 512;
-    fseek(off, offset, SEEK_SET);
-    n = fwrite(block, sizeof(char), size, off);
-    if (n < size) {
-        if (feof(iff)) {
-            perror("EOF met too early");
-            err = EOF;
-        } else {
-            err = ferror(iff);
-            fprintf(stderr, "fwrite failed, got error %d", err);
+static char *alloc_buffer(char *buf, size_t size, size_t *old_size) {
+    if (!buf) {
+        buf = malloc(size);
+    } else if (*old_size < size) {
+        buf = realloc(buf, size);
+        if (buf) {
+            *old_size = size;
         }
     }
-out2:
-    free(block);
-out:
-    fclose(iff);
-    return 0;
+    return buf;
 }
 
-int restore_snapshot(const char *dev, char * const *snapshot) {
+int restore_snapshot(const char *dev, const char *snapshot) {
     FILE* off = fopen(dev, "rb+");
     if (!off) {
-        int err = ferror(off);
-        fprintf(stderr, "cannot open %s got error %d", dev, err);
-        return err;
-    }    
-    int err;
-    const int fts_opts = FTS_COMFOLLOW | FTS_LOGICAL | FTS_NOCHDIR;
-    FTS *ftsp = fts_open(snapshot, fts_opts, NULL);
-    if (!ftsp) {
-        perror("fts_open failed");
-        err = -1;
-        goto out;
-    }
-    
-    FTSENT *chp = fts_children(ftsp, 0);
-    if (!chp) {
-        printf("directory %s is empty", snapshot);
-        err = 0;
-        goto out2;
+        perror(dev);
+        return -errno;
     }
 
-    for (FTSENT *p = fts_read(ftsp); p; p = fts_read(ftsp)) {
-        switch (p->fts_info) {
-            case FTS_F:
-                err = dd(off, p);
-                if (err) {
-                    break;
-                }
-                break;
-            default:
-                break;
+    FILE* iff = fopen(snapshot, "rb");
+    if (!iff) {
+        perror(snapshot);
+        fclose(off);
+        return -errno;
+    }
+
+    int err = 0;
+    char *buffer = NULL;
+    size_t last_buffer_size = 0;
+    for (;;) {
+        struct snap_header header;
+        if (fread(&header, sizeof(header), 1, iff) < 1) {
+            if (ferror(iff)) {
+                err = -errno;
+                perror(snapshot);
+            }
+            break;
+        }
+
+        buffer = alloc_buffer(buffer, header.nbytes, &last_buffer_size);
+        if (!buffer) {
+            err = -ENOMEM;
+            break;
+        }
+
+        size_t n = fread(buffer, 1, header.nbytes, iff);
+        if (n < header.nbytes) {
+            if (ferror(iff)) {
+                err = -errno;
+                perror(snapshot);
+            } else {
+                err = EOF;
+                fprintf(stderr, "EOF met too early");
+            }
+            break;
+        }
+        off_t offset = header.sector * 512;
+        if (fseek(off, offset, SEEK_SET)) {
+            err = -errno;
+            perror("seek failed");
+            break;
+        }
+        n = fwrite(buffer, 1, header.nbytes, off);
+        if (n < header.nbytes) {
+            err = -errno;
+            perror(dev);
+            break;
         }
     }
-out2:
-    fts_close(ftsp);
-out:
+    if (buffer) {
+        free(buffer);
+    }
+    fclose(iff);
     fclose(off);
     return err;
 }
