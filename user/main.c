@@ -2,6 +2,7 @@
 #include <argp.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -124,8 +125,16 @@ int main(int argc, char *argv[]) {
                 printf("cannot open file, got error %d\n", errno);
                 exit(errno);
             }
+            char *path = malloc(PATH_MAX);
+            if (!path) {
+                exit(-ENOMEM);
+            }
+            if (!realpath(args.s1, path)) {
+                perror(args.s1);
+                exit(-errno);
+            }
             struct ioctl_params params = {
-                .path = args.s1,
+                .path = path,
                 .path_len = strlen(args.s1),
                 .password = args.s2,
                 .password_len = strlen(args.s2),
@@ -134,6 +143,7 @@ int main(int argc, char *argv[]) {
             if (!err) {
                 err = params.error;                
             }
+            free(path);
             break;
         case LS_SNAPSHOT:
             ls();
