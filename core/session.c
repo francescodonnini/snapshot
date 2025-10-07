@@ -3,7 +3,7 @@
 #include "pr_format.h"
 #include <linux/slab.h>
 
-static const int PREFIX_LEN = 11;
+static const int PREFIX_LEN = 37;
 
 static const int DIRNAME_LEN = PREFIX_LEN
     + strlen("dd-MM-yyyyThh:mm:ss.nnnnnnnnn");
