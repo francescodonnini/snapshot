@@ -97,7 +97,8 @@
         "xarray.h": "c",
         "bitops.h": "c",
         "bitset16.h": "c",
-        "mutex.h": "c"
+        "mutex.h": "c",
+        "bitmap.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled",
     "makefile.configureOnOpen": true,

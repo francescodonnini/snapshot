@@ -19,10 +19,18 @@ static char *password;
 module_param(password, charp, 0);
 MODULE_PARM_DESC(password, "Password required to use snapshot service");
 
+static char *snapshots_directory = "/snapshots";
+module_param(snapshots_directory, charp, 0444);
+MODULE_PARM_DESC(snapshots_directory, "Directory where snapshots will be stored");
+
 static int __init bsnapshot_init(void) {
     int err = auth_set_password(password);
     if (err) {
         return err;
+    }
+    err = snapshot_init(snapshots_directory);
+    if (err) {
+        goto snapshot_init_failed;
     }
     err = registry_init();
     if (err) {
@@ -31,10 +39,6 @@ static int __init bsnapshot_init(void) {
     err = chrdev_init();
     if (err) {
         goto chrdev_failed;
-    }
-    err = snapshot_init();
-    if (err) {
-        goto snapshot_init_failed;
     }
     err = probes_init();
     if (err) {
@@ -49,12 +53,12 @@ static int __init bsnapshot_init(void) {
 bnull_init_failed:
     probes_cleanup();
 probes_init_failed:
-    snapshot_cleanup();
-snapshot_init_failed:
     chrdev_cleanup();
 chrdev_failed:
     registry_cleanup();
 registry_failed:
+    snapshot_cleanup();
+snapshot_init_failed:
     auth_clear_password();
     pr_err("bsnapshots_init failed, got error %d", err);
     return err;
@@ -63,9 +67,9 @@ registry_failed:
 static void __exit bsnapshot_exit(void) {
     bnull_cleanup();
     probes_cleanup();
-    snapshot_cleanup();
     chrdev_cleanup();
     registry_cleanup();
+    snapshot_cleanup();
     auth_clear_password();
 }
 

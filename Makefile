@@ -43,6 +43,10 @@ mount:
 		insmod singlefile-FS/singlefilefs.ko
 		insmod snapshot.ko password="$(shell cat secrets/password)"
 
+mount2:
+		insmod singlefile-FS/singlefilefs.ko
+		insmod snapshot.ko password="$(shell cat secrets/password)" snapshots_directory="/home/soa/snapshots"
+
 rm:
 		rmmod snapshot
 		rmmod singlefilefs

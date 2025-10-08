@@ -28,10 +28,6 @@ struct bio_private_data {
 #define page_iter_for_each(pos, pd)\
         for ((pos) = (pd)->iter; pos < &(pd)->iter[(pd)->iter_len]; ++pos)\
 
-int snapshot_init(void);
-
-void snapshot_cleanup(void);
-
 int write_bio_enqueue(struct bio *bio);
 
 void dbg_dump_bio(const char *prefix, struct bio *bio);

@@ -76,57 +76,138 @@ struct workqueue_struct *read_bio_wq;
 
 struct workqueue_struct *save_blocks_wq;
 
-static struct dentry *root_dentry;
+static struct dentry *root_dentry = NULL;
 
 /**
- * mkdir_snapshots creates the directory /snapshots if it doesn't exist. It returns 0 on success or if it already exists,
- * <0 otherwise.
+ * parent_directory returns the parent directory of dir.
+ * It returns NULL in case of error, an heap allocated string representing the parent
+ * directory otherwise. The path returned is normalized - i.e. it doesn't end with a slash.
  */
-static int mkdir_snapshots(void) {
-    struct path parent;
-    int err = kern_path("/", LOOKUP_DIRECTORY, &parent);
-    if (err) {
-        pr_err("kern_path failed on '/', got error %d (%s)", err, errtoa(err));
-        return err;
+static const char *parent_directory(const char *path) {
+    if (!path || *path == '\0') {
+        return NULL;
+    }
+    size_t len = strnlen(path, PATH_MAX);
+    if (len == PATH_MAX) {
+        return NULL;
+    }
+    char *s = kstrdup(path, GFP_KERNEL);
+    if (!s) {
+        return NULL;
+    }
+    // remove trailing slashes
+    while (len > 0 && s[len - 1] == '/') {
+        s[--len] = '\0';
+    }
+    char *p = strrchr(s, '/');
+    if (!p) {
+        kfree(s);
+        return NULL;
+    }
+    // A UNIX path can start with one or three slashes and if the parent is the root directory
+    // we need to know where the first slash is
+    while (p > s && *(p - 1) == '/') {
+        p--;
+    }
+    if (p == s) {
+        p[1] = '\0';
+    } else {
+        *p = '\0';
+    }
+    return s;
+}
+
+/**
+ * basename returns the pointer to the first character of the last component of path.
+ * It returns NULL if the path is empty, too long, terminates with a slash or doesn't contain slashes.
+ */
+static const char *basename(const char *path) {
+    if (!path || *path == '\0') {
+        return NULL;
+    }
+    size_t len = strnlen(path, PATH_MAX);
+    if (len == PATH_MAX) {
+        return NULL;
+    }
+    if (len > 0 && path[len - 1] == '/') {
+        return NULL;
+    }
+    char *p = strrchr(path, '/');
+    if (!p) {
+        return NULL;
+    }
+    return p + 1;
+}
+
+/**
+ * mkdir_snapshots creates the directory where to store the snapshots if it doesn't already exist.
+ * It returns 0 on success or if it already exists, <0 otherwise.
+ */
+static int mkdir_snapshots(const char *directory) {
+    const char *p = parent_directory(directory);
+    if (!p) {
+        pr_err("cannot get parent directory of %s", directory);
+        return -EINVAL;
+    }
+    int err;
+    const char *dirname = basename(directory);
+    if (!dirname) {
+        pr_err("invalid path %s", directory);
+        err = -EINVAL;
+        goto out;
     }
 
+    pr_info("parent=%s, dirname=%s", p, dirname);
+
+    struct path parent;
+    err = kern_path(p, LOOKUP_DIRECTORY, &parent);
+    if (err) {
+        pr_err("kern_path failed on %s got error %d (%s)", p, err, errtoa(err));
+        goto out;
+    }
     struct dentry *d_parent = parent.dentry;
     inode_lock(d_inode(d_parent));
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
-    struct dentry *dentry = lookup_one(mnt_idmap(parent.mnt), &QSTR("snapshots"), d_parent);
+    struct dentry *dentry = lookup_one(mnt_idmap(parent.mnt), &QSTR(dirname), d_parent);
 #else
-    struct dentry *dentry = lookup_one_len("snapshots", d_parent, strlen("snapshots"));
+    struct dentry *dentry = lookup_one_len(dirname, d_parent, strlen(dirname));
 #endif
     if (IS_ERR(dentry)) {
         err = PTR_ERR(dentry);
-        pr_err("lookup_one_len failed on 'snapshots', got error %d (%s)", err, errtoa(err));
+        pr_err("lookup_one_len failed got error %d (%s)", err, errtoa(err));
         goto out_unlock_put;
     }
 
     if (d_really_is_positive(dentry)) {
-        pr_debug(pr_format("directory /snapshots already exists"));
-        dput(dentry);
+        pr_debug(pr_format("snapshots directory already exists"));
+        root_dentry = dentry;
+        dget(root_dentry);
         goto out_unlock_put;
     }
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
     dentry = vfs_mkdir(mnt_idmap(parent.mnt), d_inode(d_parent), dentry, 0755);
     if (IS_ERR(dentry)) {
         err = PTR_ERR(dentry);
-        pr_err("vfs_mkdir failed on '%s', got error %d (%s)", ROOT_DIR, err, errtoa(err));
+        pr_err("vfs_mkdir failed to create snapshots directory got error %d (%s)", err, errtoa(err));
     } else {
-        dput(dentry);
+        root_dentry = dentry;
+        dget(root_dentry);
     }
 #else
     err = vfs_mkdir(mnt_idmap(parent.mnt), d_inode(d_parent), dentry, 0755);
     if (err) {
-        pr_err("vfs_mkdir failed on '%s', got error %d (%s)", ROOT_DIR, err, errtoa(err));
+        pr_err("vfs_mkdir failed to create snapshots directory got error %d (%s)", err, errtoa(err));
     } else {
-        dput(dentry);
+        root_dentry = dentry;
+        dget(root_dentry);
     }
 #endif
 out_unlock_put:
     inode_unlock(d_inode(d_parent));
     path_put(&parent);
+out:
+    kfree(p);
     return err;
 }
 
@@ -135,38 +216,38 @@ static int snap_map_init(void) {
     return 0;
 }
 
-int snapshot_init(void) {
+int snapshot_init(const char *directory) {
     int err = snap_map_init();
     if (err) {
         return err;
     }
-    err = mkdir_snapshots();
+    err = mkdir_snapshots(directory);
     if (err) {
         return err;
     }
     write_bio_wq = alloc_ordered_workqueue("write-bio-wq", 0);
     if (!write_bio_wq) {
-        pr_err("out of memory");
-        return -ENOMEM;
-    }
-    read_bio_wq = alloc_workqueue("save-files-wq", WQ_UNBOUND | WQ_MEM_RECLAIM, 0);
-    if (!read_bio_wq) {
-        pr_err("out of memory");
         err = -ENOMEM;
         goto out;
     }
-    save_blocks_wq = alloc_workqueue("save-blocks-wq", WQ_UNBOUND | WQ_MEM_RECLAIM, 0);
-    if (!save_blocks_wq) {
-        pr_err("out of memory");
+    read_bio_wq = alloc_workqueue("save-files-wq", WQ_UNBOUND | WQ_MEM_RECLAIM, 0);
+    if (!read_bio_wq) {
         err = -ENOMEM;
         goto out2;
     }
+    save_blocks_wq = alloc_workqueue("save-blocks-wq", WQ_UNBOUND | WQ_MEM_RECLAIM, 0);
+    if (!save_blocks_wq) {
+        err = -ENOMEM;
+        goto out3;
+    }
     return 0;
 
-out2:
+out3:
     destroy_workqueue(read_bio_wq);
-out:
+out2:
     destroy_workqueue(write_bio_wq);
+out:
+    dput(root_dentry);
     return err;
 }
 
@@ -204,57 +285,51 @@ void snapshot_cleanup(void) {
         destroy_workqueue(save_blocks_wq);
     }
     snap_map_cleanup();
+    dput(root_dentry);
 }
 
 /**
- * mkdir_session creates the directory /snapshots/<session> if it doesn't exist. It returns 0 on success or if it already exists,
- * <0 otherwise.
+ * mkdir_session creates the directory /snapshots/<session> if it doesn't exist.
+ * It returns an heap allocated string representing the path of the directory just created, an
+ * error pointer otherwise.
  */
-static int mkdir_session(const char *session) {
-    struct path parent;
-    int err = kern_path(ROOT_DIR, LOOKUP_DIRECTORY, &parent);
-    if (err) {
-        pr_err("%s does not exist, got error %d (%s)", ROOT_DIR, err, errtoa(err));
-        return err;
-    }
-
-    struct dentry *d_parent = parent.dentry;
-    inode_lock(d_inode(d_parent));
+static const char *mkdir_session(const char *session, char *buf, size_t len) {
+    inode_lock(d_inode(root_dentry));
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
-    struct dentry *dentry = lookup_one(mnt_idmap(parent.mnt), &QSTR(session), d_parent);
+    struct dentry *dentry = lookup_one(&nop_mnt_idmap, &QSTR(session), root_dentry);
 #else
-    struct dentry *dentry = lookup_one_len(session, d_parent, strlen(session));
+    struct dentry *dentry = lookup_one_len(session, root_dentry, strlen(session));
 #endif
+    char *path;
     if (IS_ERR(dentry)) {
-        err = PTR_ERR(dentry);
-        pr_err("lookup_one_len failed on '%s', got error %d (%s)", session, err, errtoa(err));
+        path = ERR_CAST(dentry);
         goto out_unlock_put;
     }
-    
-    if (d_really_is_positive(dentry)) {
-        dput(dentry);
-        goto out_unlock_put;
-    }
+    if (d_really_is_negative(dentry)) {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
-    dentry = vfs_mkdir(mnt_idmap(parent.mnt), d_inode(d_parent), dentry, 0755);
-    if (IS_ERR(dentry)) {
-        err = PTR_ERR(dentry);
-        pr_err("vfs_mkdir failed on '%s/%s', got error %d (%s)", ROOT_DIR, session, err, errtoa(err));
-    } else {
-        dput(dentry);
-    }
+        dentry = vfs_mkdir(&nop_mnt_idmap, d_inode(root_dentry), dentry, 0755);
+        if (IS_ERR(dentry)) {
+            path = ERR_CAST(dentry);
+            pr_err("vfs_mkdir failed to got error %d (%s)", err, errtoa(err));
+            goto out_unlock_put;
+        }
 #else
-    err = vfs_mkdir(mnt_idmap(parent.mnt), d_inode(d_parent), dentry, 0755);
-    if (err) {
-        pr_err("vfs_mkdir failed on %s/%s, got error %d (%s)", ROOT_DIR, session, err, errtoa(err));
-    } else {
-        dput(dentry);
-    }
+        int err = vfs_mkdir(&nop_mnt_idmap, d_inode(root_dentry), dentry, 0755);
+        if (err) {
+            pr_err("vfs_mkdir failed got error %d (%s)", err, errtoa(err));
+            path = ERR_PTR(err);
+        }
 #endif
+        if (IS_ERR(dentry)) {
+            path = ERR_CAST(dentry);
+            goto out_unlock_put;
+        }
+    }
+    path = dentry_path_raw(dentry, buf, len);
+    dput(dentry);
 out_unlock_put:
-    inode_unlock(d_inode(d_parent));
-    path_put(&parent);
-    return err;
+    inode_unlock(d_inode(root_dentry));
+    return path;
 }
 
 static inline void free_all_pages(struct bio_private_data *p_data) {
@@ -360,21 +435,31 @@ out:
     kfree(w);
 }
 
-
 static struct file* try_create_file(const char *session_id, const char *name) {
-    size_t len = strlen(ROOT_DIR) + strlen(session_id) + strlen(name) + 3;
-    if (len > PATH_MAX) {
-        return ERR_PTR(-ENAMETOOLONG);
-    }
-    char *path = kzalloc(len, GFP_KERNEL);
-    if (!path) {
+    char *buf = kzalloc(PATH_MAX, GFP_KERNEL);
+    if (!buf) {
         return ERR_PTR(-ENOMEM);
     }
-    sprintf(path, "%s/%s/%s", ROOT_DIR, session_id, name);
+    const char *parent = mkdir_session(session_id, buf, PATH_MAX);
+    if (IS_ERR(parent)) {
+        return ERR_CAST(parent);
+    }
+    size_t len = strnlen(parent, PATH_MAX) + strnlen(name, PATH_MAX) + 1;
+    if (len >= PATH_MAX) {
+        kfree(buf);
+        return ERR_PTR(-ENAMETOOLONG);
+    }
+    char *path = kzalloc(len + 1, GFP_KERNEL);
+    if (!path) {
+        kfree(buf);
+        return ERR_PTR(-ENOMEM);
+    }
+    sprintf(path, "%s/%s", parent, name);
     struct file *fp = filp_open(path, O_CREAT | O_WRONLY | O_APPEND, 0600);
     if (IS_ERR(fp)) {
-        pr_err("cannot open file %s, got error %ld (%s)", path, PTR_ERR(fp), errtoa(PTR_ERR(fp)));
+        pr_err("cannot open file %s got error %ld (%s)", path, PTR_ERR(fp), errtoa(PTR_ERR(fp)));
     }
+    kfree(buf);
     kfree(path);
     return fp;
 }
@@ -480,11 +565,6 @@ static void snapshot_save(struct work_struct *work) {
     int err = registry_add_range(p_data->dev, &session_created_on, range);
     if (err) {
         kfree(range);
-    }
-
-    err = mkdir_session(dirname);
-    if (err && err != -EEXIST) {
-        goto free_session;
     }
 
     err = snap_map_create(dirname, p_data->dev, &session_created_on);

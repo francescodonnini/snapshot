@@ -5,7 +5,7 @@
 #include <linux/time64.h>
 #include <linux/types.h>
 
-int snapshot_init(void);
+int snapshot_init(const char *directory);
 
 void snapshot_cleanup(void);
 
