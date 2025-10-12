@@ -310,6 +310,7 @@ static const char *mkdir_session(const char *session, char *buf, size_t len) {
         dentry = vfs_mkdir(&nop_mnt_idmap, d_inode(root_dentry), dentry, 0755);
         if (IS_ERR(dentry)) {
             path = ERR_CAST(dentry);
+            int err = PTR_ERR(dentry);
             pr_err("vfs_mkdir failed to got error %d (%s)", err, errtoa(err));
             goto out_unlock_put;
         }
